@@ -147,6 +147,14 @@ ERROR_HINTS = [
 PROGRESS_RE = re.compile(r"\(\s*(\d+)\s*/\s*(\d+)\s*\)")
 UPGRADING_RE = re.compile(r"upgrading\s+([a-zA-Z0-9@._+-]+)")
 
+# yay prints its early warnings through fallbackLog, before --color never is
+# parsed, so colour codes show up even with colour disabled.
+ANSI_RE = re.compile(r"\x1b\[[0-9;]*[a-zA-Z]")
+
+# "package 1.0-1 -> 1.1-1 [2h5m]". Matching loosely on "->" is not enough:
+# yay formats its warnings as "-> message", which would be counted as updates.
+AUR_UPDATE_RE = re.compile(r"^\S+\s+\S+\s+->\s+\S+")
+
 
 # --------------------------------------------------------------------------
 # state
@@ -228,29 +236,61 @@ def _yay_env():
     return env
 
 
-def _flatpak_user_cmd(flatpak, user, home, args):
-    """Build a `flatpak --user` invocation for the desktop user.
+def _is_root():
+    return os.geteuid() == 0
 
-    `runuser` sets HOME/USER/LOGNAME but inherits everything else. If Decky's
-    service environment happens to carry XDG_DATA_HOME, FLATPAK_USER_DIR or
-    friends, flatpak would silently operate on the wrong tree - so the
-    environment is rebuilt from scratch with `env -i` instead of scrubbed.
+
+def _desktop_user():
+    """The real desktop user, or ("", "") if we cannot determine it."""
+    user = getattr(decky, "DECKY_USER", "") or ""
+    home = getattr(decky, "DECKY_USER_HOME", "") or ""
+    return (user, home) if user and user != "root" and home else ("", "")
+
+
+def _can_run_as_user():
+    """True if work can be performed under the desktop user's identity.
+
+    Either we already are that user (development), or we are root and can drop
+    to them via runuser.
     """
-    return [
-        "runuser", "-u", user, "--",
-        "env", "-i",
+    user, _ = _desktop_user()
+    if not user:
+        return False
+    return not _is_root() or bool(_which("runuser"))
+
+
+def _user_cmd(cmd, extra_env=None):
+    """Return (command, env) that runs `cmd` as the desktop user.
+
+    Anything that only reads - checkupdates, yay -Qua, flatpak --user - must
+    not run as root. yay in particular resolves its cache to /var/cache/yay
+    when root and deliberately does not create it (it relies on systemd-run's
+    CacheDirectory), so a plain query as root fails outright.
+
+    `runuser` sets HOME/USER/LOGNAME but inherits everything else. A leaked
+    XDG_DATA_HOME or FLATPAK_USER_DIR would silently point the tools at the
+    wrong tree, so the environment is rebuilt from scratch with `env -i`
+    rather than scrubbed.
+    """
+    extra_env = extra_env or {}
+    user, home = _desktop_user()
+
+    if not _is_root() or not user or not _which("runuser"):
+        env = _base_env()
+        env.update(extra_env)
+        return cmd, env
+
+    env_args = [
         f"HOME={home}",
         f"USER={user}",
         f"LOGNAME={user}",
         "PATH=/usr/local/bin:/usr/bin:/bin",
         "LC_ALL=C.UTF-8",
+        "LANG=C.UTF-8",
         "FLATPAK_FANCY_OUTPUT=0",
-        flatpak,
-    ] + args
+    ] + [f"{k}={v}" for k, v in extra_env.items()]
 
-
-def _is_root():
-    return os.geteuid() == 0
+    return ["runuser", "-u", user, "--", "env", "-i"] + env_args + cmd, _base_env()
 
 
 def _pacman_busy():
@@ -435,7 +475,7 @@ class Plugin:
             raw = await proc.stdout.readline()
             if not raw:
                 break
-            line = raw.decode("utf-8", "replace").rstrip("\n")
+            line = ANSI_RE.sub("", raw.decode("utf-8", "replace").rstrip("\n"))
             lines.append(line)
             if stream:
                 await self._log(line)
@@ -462,17 +502,24 @@ class Plugin:
     async def _check_pacman(self):
         if not _which("checkupdates"):
             return [], "missing_checkupdates"
-        env = _base_env()
-        # A stable database path: the default lives in TMPDIR and would be
-        # re-downloaded on every call.
-        db = Path(decky.DECKY_PLUGIN_RUNTIME_DIR) / "checkupdates-db"
-        db.mkdir(parents=True, exist_ok=True)
-        env["CHECKUPDATES_DB"] = str(db)
-        rc, lines = await self._run(["checkupdates"], env=env, stream=False)
+        # A stable database path under the desktop user's cache, so the sync
+        # is not repeated on every call. It has to be writable by that user,
+        # since checkupdates runs unprivileged.
+        _, home = _desktop_user()
+        cache = f"{home}/.cache/decky-cachyos-update" if home else "/tmp"
+        cmd, env = _user_cmd(
+            ["checkupdates"], {"CHECKUPDATES_DB": f"{cache}/checkupdates-db"}
+        )
+        rc, lines = await self._run(cmd, env=env, stream=False)
         # checkupdates is inverted: 0 = updates found, 2 = nothing to do.
         if rc == 2:
             return [], ""
         if rc != 0:
+            # Surface the reason instead of only a generic warning - this is
+            # the one check that has several unrelated ways to fail.
+            for line in lines[-3:]:
+                if line.strip():
+                    await self._log(f"!! checkupdates: {line.strip()}")
             return [], "checkupdates_failed"
         return [l for l in lines if l.strip()], ""
 
@@ -482,10 +529,9 @@ class Plugin:
         yay = _which("yay")
         if not yay:
             return [], "missing_yay"
-        rc, lines = await self._run(
-            [yay, "-Qua", "--color", "never"], env=_yay_env(), stream=False
-        )
-        entries = [l for l in lines if l.strip() and "->" in l]
+        cmd, env = _user_cmd([yay, "-Qua", "--color", "never"])
+        rc, lines = await self._run(cmd, env=env, stream=False)
+        entries = [l for l in lines if AUR_UPDATE_RE.match(l)]
         if rc != 0 and not entries:
             return [], ""
         return entries, ""
@@ -511,17 +557,12 @@ class Plugin:
         )
         if rc == 0:
             entries += [l for l in lines if l.strip()]
-        user = getattr(decky, "DECKY_USER", None)
-        home = getattr(decky, "DECKY_USER_HOME", "")
-        if user and home and _which("runuser"):
-            rc, lines = await self._run(
-                _flatpak_user_cmd(
-                    flatpak, user, home,
-                    ["remote-ls", "--user", "--updates",
-                     "--columns=application,version"],
-                ),
-                stream=False,
+        if _can_run_as_user():
+            cmd, env = _user_cmd(
+                [flatpak, "remote-ls", "--user", "--updates",
+                 "--columns=application,version"]
             )
+            rc, lines = await self._run(cmd, env=env, stream=False)
             if rc == 0:
                 entries += [l for l in lines if l.strip()]
         return entries, ""
@@ -591,7 +632,7 @@ class Plugin:
             phases.append("aur")
         if self.settings["enable_flatpak"] and _which("flatpak"):
             phases.append("flatpak_system")
-            if getattr(decky, "DECKY_USER", None) and _which("runuser"):
+            if _can_run_as_user():
                 phases.append("flatpak_user")
         if self.settings["enable_fwupd"] and _which("fwupdmgr"):
             phases.append("fwupd")
@@ -645,15 +686,13 @@ class Plugin:
         return rc == 0, lines
 
     async def _phase_flatpak_user(self, **kw):
-        rc, lines = await self._run(
-            _flatpak_user_cmd(
+        cmd, env = _user_cmd(
+            [
                 _which("flatpak") or "flatpak",
-                decky.DECKY_USER,
-                decky.DECKY_USER_HOME,
-                ["update", "--user", "--noninteractive"],
-            ),
-            **kw,
+                "update", "--user", "--noninteractive",
+            ]
         )
+        rc, lines = await self._run(cmd, env=env, **kw)
         return rc == 0, lines
 
     async def _phase_fwupd(self, **kw):
