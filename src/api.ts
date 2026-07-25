@@ -46,7 +46,6 @@ export interface Settings {
   enable_aur: boolean;
   enable_flatpak: boolean;
   enable_fwupd: boolean;
-  aur_skip_pgp: boolean;
   auto_check: boolean;
   check_interval_hours: number;
   notify_on_updates: boolean;

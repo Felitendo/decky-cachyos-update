@@ -34,14 +34,6 @@ export function SettingsPanel() {
       </PanelSectionRow>
       <PanelSectionRow>
         <ToggleField
-          label={t("settings.skipPgp")}
-          description={t("settings.skipPgpDesc")}
-          checked={settings.aur_skip_pgp}
-          onChange={(v) => update({ aur_skip_pgp: v })}
-        />
-      </PanelSectionRow>
-      <PanelSectionRow>
-        <ToggleField
           label={t("settings.flatpak")}
           description={t("settings.flatpakDesc")}
           checked={settings.enable_flatpak}

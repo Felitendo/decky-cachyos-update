@@ -20,6 +20,7 @@ Decky installed:
 import asyncio
 import json
 import os
+import pwd
 import re
 import shutil
 import sys
@@ -108,7 +109,6 @@ DEFAULT_SETTINGS = {
     "enable_aur": True,
     "enable_flatpak": True,
     "enable_fwupd": False,
-    "aur_skip_pgp": False,
     "auto_check": True,
     "check_interval_hours": 6,
     "notify_on_updates": True,
@@ -275,18 +275,63 @@ def _base_env():
     return env
 
 
-def _yay_env():
-    """yay must not see SUDO_USER/DOAS_USER when running as root.
+def _aur_build_env():
+    """Environment and extra arguments that let yay build properly as root.
 
-    With either set, yay picks /tmp/yay as its build directory and creates it
-    root-owned, which the de-elevated (systemd DynamicUser) build then cannot
-    write to. Unset, it uses /var/cache/yay, which systemd creates and chowns
-    itself via CacheDirectory=yay.
+    yay de-elevates makepkg one of two ways (cmd_builder.go, deElevateCommand):
+
+    - Without SUDO_USER it wraps every step in
+      `systemd-run -p DynamicUser=yes -E HOME=/tmp`. DynamicUser implies
+      PrivateTmp, so *each* step gets its own /tmp. yay imports a PKGBUILD's
+      validpgpkeys into /tmp/.gnupg in one step, and makepkg then verifies
+      signatures in the next one - against an empty keyring. Any package using
+      validpgpkeys fails forever, no matter how often it is retried.
+
+    - With SUDO_USER set it simply switches uid/gid on the child process and
+      passes the environment through. That is the same thing a plain `yay` run
+      in a terminal does, and it lets us hand it a GNUPGHOME that survives.
+
+    So the second path is used whenever the desktop user can be resolved. It
+    needs a build directory that user can write to: with SUDO_USER set,
+    getCacheHome() would pick /tmp/yay and create it root-owned, hence the
+    explicit --builddir.
+
+    Returns (env, extra_args). Falls back to the sandboxed path unchanged if
+    the user cannot be resolved or the directories cannot be prepared.
     """
     env = _base_env()
     for key in ("SUDO_USER", "DOAS_USER", "SUDO_UID", "SUDO_GID"):
         env.pop(key, None)
-    return env
+
+    user, home = _desktop_user()
+    if not (_is_root() and user and home):
+        return env, []
+
+    try:
+        account = pwd.getpwnam(user)
+    except KeyError:
+        decky.logger.warning("Unknown user %s, building AUR packages sandboxed", user)
+        return env, []
+
+    base = Path(home) / ".cache" / "decky-cachyos-update"
+    build, gnupg, build_home = base / "build", base / "gnupg", base / "home"
+    try:
+        for directory, mode in (
+            (base, 0o755), (build, 0o755), (build_home, 0o755),
+            # gpg refuses to use a home directory others can read.
+            (gnupg, 0o700),
+        ):
+            directory.mkdir(parents=True, exist_ok=True)
+            os.chown(directory, account.pw_uid, account.pw_gid)
+            directory.chmod(mode)
+    except OSError as exc:
+        decky.logger.warning("Could not prepare AUR build dirs: %s", exc)
+        return env, []
+
+    env["SUDO_USER"] = user
+    env["HOME"] = str(build_home)
+    env["GNUPGHOME"] = str(gnupg)
+    return env, ["--builddir", str(build)]
 
 
 def _is_root():
@@ -777,18 +822,12 @@ class Plugin:
         return rc == 0, lines
 
     async def _phase_aur(self, **kw):
+        env, extra = _aur_build_env()
         cmd = [
             _which("yay") or "yay", "-Syu", "--noconfirm", "--removemake",
             "--noprogressbar", "--color", "never",
-        ]
-        if self.settings.get("aur_skip_pgp"):
-            # yay builds through `systemd-run -p DynamicUser=yes`, whose HOME
-            # is a fresh private /tmp on every invocation. A PKGBUILD's
-            # validpgpkeys can therefore never be imported and packages using
-            # them fail forever. Skipping the PGP step is the only way to
-            # build them this way; the PKGBUILD's own checksums still apply.
-            cmd += ["--mflags", "--skippgpcheck"]
-        rc, lines = await self._run(cmd, env=_yay_env(), **kw)
+        ] + extra
+        rc, lines = await self._run(cmd, env=env, **kw)
         return rc == 0, lines
 
     async def _phase_flatpak_system(self, **kw):

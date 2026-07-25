@@ -1,6 +1,6 @@
 {
   "name": "decky-cachyos-update",
-  "version": "0.0.6",
+  "version": "0.0.7",
   "description": "Update CachyOS from Gamemode - pacman, AUR, Flatpak and firmware in one button.",
   "type": "module",
   "scripts": {
