@@ -1,15 +1,14 @@
 import {
   ButtonItem,
   ConfirmModal,
-  Field,
   PanelSection,
   PanelSectionRow,
-  ProgressBarWithInfo,
+  ProgressBar,
   showModal,
   staticClasses,
 } from "@decky/ui";
 import { addEventListener, definePlugin, removeEventListener, toaster } from "@decky/api";
-import { useEffect, useState } from "react";
+import { useEffect, useReducer, useState } from "react";
 import { FaSyncAlt } from "react-icons/fa";
 
 import {
@@ -19,12 +18,18 @@ import {
   reboot,
   startUpdate,
   type BackendState,
+  type ProgressEvent,
   type Status,
 } from "./api";
 import { t, tid } from "./i18n";
 import { appendLog, clearLog, clearStatus, patchState, replaceState, useStore } from "./store";
 import { primeSettings, SettingsPanel } from "./Settings";
 import { UpdateLog } from "./UpdateLog";
+
+const ACCENT = "#7ec8ff";
+const OK = "#8bd98b";
+const WARN = "#ffd280";
+const BAD = "#ff8080";
 
 function relativeTime(unixSeconds: number): string {
   if (!unixSeconds) return t("time.never");
@@ -37,19 +42,30 @@ function relativeTime(unixSeconds: number): string {
   return t("time.days", { n: Math.floor(hours / 24) });
 }
 
-function breakdown(state: BackendState): string {
-  return (["pacman", "aur", "flatpak", "fwupd"] as const)
-    .filter((key) => state.counts[key] > 0)
-    .map((key) => `${state.counts[key]} ${t(`category.${key}` as const)}`)
-    .join(" · ");
+/** mm:ss, or h:mm:ss once it gets that far. */
+function duration(seconds: number): string {
+  const s = Math.max(0, Math.floor(seconds));
+  const pad = (n: number) => String(n).padStart(2, "0");
+  if (s < 3600) return `${Math.floor(s / 60)}:${pad(s % 60)}`;
+  return `${Math.floor(s / 3600)}:${pad(Math.floor((s % 3600) / 60))}:${pad(s % 60)}`;
 }
 
-function statusLine(state: BackendState): { text: string; color: string } {
+/** Re-renders once a second so the elapsed clock keeps ticking. */
+function useTicker(active: boolean) {
+  const [, tick] = useReducer((x: number) => x + 1, 0);
+  useEffect(() => {
+    if (!active) return;
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, [active]);
+}
+
+function headline(state: BackendState): { text: string; color: string } {
   switch (state.status) {
     case "checking":
-      return { text: t("status.checking"), color: "#d0d0d0" };
+      return { text: t("status.checking"), color: ACCENT };
     case "updating":
-      return { text: tid("phase", state.phase) || t("status.updating"), color: "#7ec8ff" };
+      return { text: tid("phase", state.phase) || t("status.updating"), color: ACCENT };
     case "error":
       return {
         text: state.failed_phases.length
@@ -57,10 +73,10 @@ function statusLine(state: BackendState): { text: string; color: string } {
               phases: state.failed_phases.map((p) => tid("phase", p)).join(", "),
             })
           : state.error_text || t("status.failed"),
-        color: "#ff8080",
+        color: BAD,
       };
     case "done":
-      return { text: t("status.done"), color: "#8bd98b" };
+      return { text: t("status.done"), color: OK };
     default:
       if (state.total > 0) {
         return {
@@ -68,11 +84,77 @@ function statusLine(state: BackendState): { text: string; color: string } {
             state.total === 1
               ? t("status.updatesAvailableOne")
               : t("status.updatesAvailable", { n: state.total }),
-          color: "#ffd280",
+          color: WARN,
         };
       }
-      return { text: t("status.upToDate"), color: "#8bd98b" };
+      return { text: t("status.upToDate"), color: OK };
   }
+}
+
+/** Second line: what is going on right now, or when we last looked. */
+function subline(state: BackendState): string {
+  if (state.status === "updating") {
+    const parts: string[] = [];
+    if (state.update_started) {
+      parts.push(
+        t("update.elapsed", {
+          time: duration(Date.now() / 1000 - state.update_started),
+        }),
+      );
+    } else {
+      parts.push(t("update.starting"));
+    }
+    if (state.download_mib > 0) {
+      parts.push(t("update.downloading", { size: Math.round(state.download_mib) }));
+    }
+    return parts.join(" · ");
+  }
+
+  if (state.status === "idle" && state.total > 0) {
+    return (["pacman", "aur", "flatpak", "fwupd"] as const)
+      .filter((key) => state.counts[key] > 0)
+      .map((key) => `${state.counts[key]} ${t(`category.${key}` as const)}`)
+      .join(" · ");
+  }
+
+  return t("time.lastChecked", { when: relativeTime(state.last_check) });
+}
+
+function StatusHeader({ state }: { state: BackendState }) {
+  const head = headline(state);
+  return (
+    <div style={{ padding: "2px 0 6px" }}>
+      <div
+        style={{
+          color: head.color,
+          fontSize: "17px",
+          fontWeight: 700,
+          lineHeight: 1.25,
+        }}
+      >
+        {head.text}
+      </div>
+      <div style={{ fontSize: "12px", opacity: 0.6, marginTop: "2px" }}>
+        {subline(state)}
+      </div>
+    </div>
+  );
+}
+
+function Note({ children, color }: { children: React.ReactNode; color?: string }) {
+  return (
+    <div
+      style={{
+        fontSize: "12px",
+        lineHeight: 1.4,
+        color: color ?? "inherit",
+        opacity: color ? 1 : 0.6,
+        padding: "2px 0",
+      }}
+    >
+      {children}
+    </div>
+  );
 }
 
 function Content() {
@@ -80,6 +162,9 @@ function Content() {
   const [showLog, setShowLog] = useState(false);
   const [showDetails, setShowDetails] = useState(false);
   const [reasonId, setReasonId] = useState("");
+
+  const running = state.status === "checking" || state.status === "updating";
+  useTicker(state.status === "updating");
 
   // The panel remounts every time the user opens Quick Access, so re-sync
   // with the backend, which is the source of truth.
@@ -93,9 +178,6 @@ function Content() {
       }
     })();
   }, []);
-
-  const running = state.status === "checking" || state.status === "updating";
-  const status = statusLine(state);
 
   const onCheck = async () => {
     setReasonId("");
@@ -136,30 +218,19 @@ function Content() {
 
   return (
     <>
-      <PanelSection title={t("section.title")}>
+      <PanelSection>
         <PanelSectionRow>
-          <Field
-            label={status.text}
-            description={
-              state.status === "idle" && state.total > 0
-                ? breakdown(state)
-                : t("time.lastChecked", { when: relativeTime(state.last_check) })
-            }
-            focusable={false}
-            bottomSeparator="none"
-          >
-            <div style={{ color: status.color, fontWeight: 600 }}>
-              {state.status === "idle" && state.total > 0 ? state.total : ""}
-            </div>
-          </Field>
+          <StatusHeader state={state} />
         </PanelSectionRow>
 
         {state.status === "updating" && (
           <PanelSectionRow>
-            <ProgressBarWithInfo
+            {/* No label on the bar itself: the header above already says what
+                is happening, and Steam clips long strings inside the bar. */}
+            <ProgressBar
               nProgress={state.progress}
-              sOperationText={tid("phase", state.phase)}
-              indeterminate={state.progress <= 0}
+              indeterminate={state.downloading || state.progress <= 0}
+              nTransitionSec={1}
             />
           </PanelSectionRow>
         )}
@@ -170,39 +241,35 @@ function Content() {
           </ButtonItem>
         </PanelSectionRow>
 
-        <PanelSectionRow>
-          <ButtonItem layout="below" disabled={running} onClick={onCheck}>
-            {t("btn.checkNow")}
-          </ButtonItem>
-        </PanelSectionRow>
+        {state.status !== "updating" && (
+          <PanelSectionRow>
+            <ButtonItem layout="below" disabled={running} onClick={onCheck}>
+              {t("btn.checkNow")}
+            </ButtonItem>
+          </PanelSectionRow>
+        )}
 
         {state.status === "updating" && (
           <PanelSectionRow>
-            <div style={{ fontSize: "11px", opacity: 0.65 }}>{t("update.noCancel")}</div>
+            <Note>{t("update.noCancel")}</Note>
           </PanelSectionRow>
         )}
 
         {reasonId && (
           <PanelSectionRow>
-            <div style={{ fontSize: "12px", color: "#ffd280" }}>
-              {tid("reason", reasonId)}
-            </div>
+            <Note color={WARN}>{tid("reason", reasonId)}</Note>
           </PanelSectionRow>
         )}
 
         {state.hint_id && (
           <PanelSectionRow>
-            <div style={{ fontSize: "12px", color: "#ffd280" }}>
-              {tid("hint", state.hint_id)}
-            </div>
+            <Note color={WARN}>{tid("hint", state.hint_id)}</Note>
           </PanelSectionRow>
         )}
 
         {state.warnings.map((warning) => (
           <PanelSectionRow key={warning}>
-            <div style={{ fontSize: "12px", color: "#ffd280" }}>
-              {tid("warning", warning)}
-            </div>
+            <Note color={WARN}>{tid("warning", warning)}</Note>
           </PanelSectionRow>
         ))}
 
@@ -216,11 +283,11 @@ function Content() {
 
         {state.pacnew.length > 0 && (
           <PanelSectionRow>
-            <div style={{ fontSize: "11px", opacity: 0.75 }}>
+            <Note>
               {state.pacnew.length === 1
                 ? t("pacnew.one")
                 : t("pacnew.many", { n: state.pacnew.length })}
-            </div>
+            </Note>
           </PanelSectionRow>
         )}
       </PanelSection>
@@ -234,14 +301,28 @@ function Content() {
           </PanelSectionRow>
           {showDetails && (
             <PanelSectionRow>
-              <div style={{ fontSize: "11px", fontFamily: "monospace", lineHeight: 1.5 }}>
+              <div style={{ fontSize: "11px", lineHeight: 1.5 }}>
                 {(["pacman", "aur", "flatpak", "fwupd"] as const)
                   .filter((key) => state.details[key].length > 0)
                   .map((key) => (
-                    <div key={key} style={{ marginBottom: "6px" }}>
-                      <div style={{ opacity: 0.6 }}>{t(`category.${key}` as const)}</div>
+                    <div key={key} style={{ marginBottom: "8px" }}>
+                      <div
+                        style={{
+                          opacity: 0.5,
+                          textTransform: "uppercase",
+                          letterSpacing: "0.05em",
+                          marginBottom: "2px",
+                        }}
+                      >
+                        {t(`category.${key}` as const)}
+                      </div>
                       {state.details[key].map((item, index) => (
-                        <div key={index}>{item}</div>
+                        <div
+                          key={index}
+                          style={{ fontFamily: "monospace", wordBreak: "break-word" }}
+                        >
+                          {item}
+                        </div>
                       ))}
                     </div>
                   ))}
@@ -274,8 +355,7 @@ export default definePlugin(() => {
   // streaming while the Quick Access menu is closed.
   const onLog = (line: string) => appendLog(line);
 
-  const onProgress = (progress: number, phase: string) =>
-    patchState({ progress, phase });
+  const onProgress = (event: ProgressEvent) => patchState(event);
 
   const onStatus = (status: string) => patchState({ status: status as Status });
 
@@ -309,7 +389,7 @@ export default definePlugin(() => {
   };
 
   addEventListener<[string]>("cachyos_update_log", onLog);
-  addEventListener<[number, string]>("cachyos_update_progress", onProgress);
+  addEventListener<[ProgressEvent]>("cachyos_update_progress", onProgress);
   addEventListener<[string]>("cachyos_update_state", onStatus);
   addEventListener<[boolean, string[], boolean]>("cachyos_update_finished", onFinished);
   addEventListener<[number]>("cachyos_update_available", onAvailable);

@@ -24,6 +24,9 @@ export interface BackendState {
   status: Status;
   phase: string; // phase id, e.g. "pacman"
   progress: number; // 0..1
+  update_started: number; // unix seconds, 0 when idle
+  download_mib: number; // size the current phase is downloading, 0 if unknown
+  downloading: boolean; // true while pacman/yay are fetching packages
   log: string[];
   counts: Counts;
   details: Details;
@@ -76,3 +79,12 @@ export const getSettings = callable<[], Settings>("get_settings");
 export const setSettings = callable<[settings: Partial<Settings>], Settings>("set_settings");
 export const reboot = callable<[], boolean>("reboot");
 export const selfTest = callable<[], SelfTest>("self_test");
+
+/** Payload of the "cachyos_update_progress" event. */
+export interface ProgressEvent {
+  progress: number;
+  phase: string;
+  update_started: number;
+  download_mib: number;
+  downloading: boolean;
+}

@@ -156,6 +156,11 @@ ANSI_RE = re.compile(r"\x1b\[[0-9;]*[a-zA-Z]")
 # yay formats its warnings as "-> message", which would be counted as updates.
 AUR_UPDATE_RE = re.compile(r"^\S+\s+\S+\s+->\s+\S+")
 
+# With --noprogressbar pacman prints nothing at all while downloading, which
+# on a slow connection means minutes of silence. Knowing the size up front is
+# what makes that wait understandable.
+DOWNLOAD_SIZE_RE = re.compile(r"Total Download Size:\s*([\d.]+)\s*MiB")
+
 
 # --------------------------------------------------------------------------
 # state
@@ -167,6 +172,9 @@ class State:
         self.status = "idle"  # idle | checking | updating | done | error
         self.phase = ""
         self.progress = 0.0
+        self.update_started = 0.0
+        self.download_mib = 0.0
+        self.downloading = False
         self.log = deque(maxlen=LOG_MAX_LINES)
         self.counts = {"pacman": 0, "aur": 0, "flatpak": 0, "fwupd": 0}
         self.details = {"pacman": [], "aur": [], "flatpak": [], "fwupd": []}
@@ -184,6 +192,9 @@ class State:
             "status": self.status,
             "phase": self.phase,
             "progress": self.progress,
+            "update_started": self.update_started,
+            "download_mib": self.download_mib,
+            "downloading": self.downloading,
             "log": list(self.log),
             "counts": self.counts,
             "details": self.details,
@@ -446,7 +457,23 @@ class Plugin:
     async def _set_phase(self, phase, done_weight, total_weight):
         self.state.phase = phase
         self.state.progress = done_weight / total_weight if total_weight else 0.0
-        await decky.emit("cachyos_update_progress", self.state.progress, phase)
+        # Each phase reports its own download size.
+        self.state.download_mib = 0.0
+        self.state.downloading = False
+        await self._emit_progress()
+
+    async def _emit_progress(self):
+        # One object rather than a growing list of positional arguments.
+        await decky.emit(
+            "cachyos_update_progress",
+            {
+                "progress": self.state.progress,
+                "phase": self.state.phase,
+                "update_started": self.state.update_started,
+                "download_mib": self.state.download_mib,
+                "downloading": self.state.downloading,
+            },
+        )
 
     async def _set_status(self, status):
         self.state.status = status
@@ -500,9 +527,24 @@ class Plugin:
             if not raw:
                 break
             line = ANSI_RE.sub("", raw.decode("utf-8", "replace").rstrip("\n"))
+            # Carriage returns redraw a line in place; keep only what would
+            # actually be visible.
+            if "\r" in line:
+                line = line.rsplit("\r", 1)[-1]
             lines.append(line)
             if stream:
                 await self._log(line)
+
+                size = DOWNLOAD_SIZE_RE.search(line)
+                if size:
+                    self.state.download_mib = float(size.group(1))
+                    await self._emit_progress()
+                elif line.startswith(":: Retrieving packages"):
+                    # Nothing is printed again until the first package is
+                    # installed, so let the bar animate instead of freezing.
+                    self.state.downloading = True
+                    await self._emit_progress()
+
                 # pacman/yay print "(12/34) upgrading foo" - use it to move the
                 # bar inside a phase instead of only between phases.
                 if phase_span:
@@ -512,11 +554,8 @@ class Plugin:
                         if total:
                             frac = min(cur / total, 1.0)
                             self.state.progress = phase_base + phase_span * frac
-                            await decky.emit(
-                                "cachyos_update_progress",
-                                self.state.progress,
-                                self.state.phase,
-                            )
+                            self.state.downloading = False
+                            await self._emit_progress()
 
         rc = await proc.wait()
         return rc, lines
@@ -758,6 +797,9 @@ class Plugin:
             self.state.warnings = []
             self.state.failed_phases = []
             self.state.progress = 0.0
+            self.state.download_mib = 0.0
+            self.state.downloading = False
+            self.state.update_started = time.time()
             await self._set_status("updating")
 
             phases = self._enabled_phases()

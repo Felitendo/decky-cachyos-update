@@ -55,8 +55,10 @@ const en = {
   "time.days": "{n} d ago",
 
   "log.empty": "No output yet.",
-  "update.noCancel":
-    "A running update cannot be cancelled - aborting mid-transaction can break the system.",
+  "update.noCancel": "This cannot be cancelled once it has started.",
+  "update.elapsed": "running for {time}",
+  "update.downloading": "downloading {size} MiB",
+  "update.starting": "starting…",
   "reboot.needed": "A kernel or system update requires a restart.",
   "reboot.title": "Restart now?",
   "reboot.description":
@@ -177,8 +179,10 @@ const de: Record<Key, string> = {
   "time.days": "vor {n} Tg.",
 
   "log.empty": "Noch keine Ausgabe.",
-  "update.noCancel":
-    "Ein laufendes Update lässt sich nicht abbrechen - ein Abbruch mitten in einer Paketinstallation kann das System beschädigen.",
+  "update.noCancel": "Ein laufendes Update lässt sich nicht abbrechen.",
+  "update.elapsed": "läuft seit {time}",
+  "update.downloading": "{size} MiB werden geladen",
+  "update.starting": "wird gestartet…",
   "reboot.needed": "Ein Kernel- oder Systemupdate braucht einen Neustart.",
   "reboot.title": "Jetzt neu starten?",
   "reboot.description":
