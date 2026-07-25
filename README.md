@@ -1,14 +1,10 @@
 # CachyOS Update
 
-Update your CachyOS handheld straight from gamemode. One button, no desktop
-mode, no terminal, no password.
+Update CachyOS handheld edition straight from gamemode.
 
 It updates your system packages, AUR packages and Flatpaks, and shows you what
 it is doing while it runs. Firmware updates can be switched on too, but they
-are off by default.
-
-The plugin speaks English and German and picks the language from your system
-settings.
+are experimental and off by default.
 
 ## Install
 
@@ -100,7 +96,3 @@ wording in it.
 `paru` refuses to run as root and offers no way around it. `yay` handles it
 properly: it runs pacman directly and drops privileges for building packages.
 That is why this plugin does not need to touch your sudo configuration.
-
-## License
-
-BSD-3-Clause
