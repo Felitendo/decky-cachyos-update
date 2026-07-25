@@ -18,7 +18,6 @@ Decky installed:
 """
 
 import asyncio
-import difflib
 import json
 import os
 import re
@@ -172,16 +171,6 @@ AUR_UPDATE_RE = re.compile(r"^\S+\s+\S+\s+->\s+\S+")
 # what makes that wait understandable.
 DOWNLOAD_SIZE_RE = re.compile(r"Total Download Size:\s*([\d.]+)\s*MiB")
 
-# pacdiff reports the new file, e.g. /etc/foo.conf.pacnew. .pacsave shows up
-# after a package was removed.
-PACNEW_SUFFIXES = (".pacnew", ".pacsave")
-MAX_DIFF_LINES = 400
-MAX_DIFF_BYTES = 512 * 1024
-
-# yay lists what it could not build under this heading, one "name - reason"
-# per line. Naming the package beats reporting the whole phase as broken.
-FAILED_HEADER = "Failed to install the following packages"
-FAILED_PKG_RE = re.compile(r"^(\S+)\s+-\s+\S")
 
 
 # --------------------------------------------------------------------------
@@ -203,7 +192,6 @@ class State:
         self.last_check = 0.0
         self.last_update = 0.0
         self.reboot_required = False
-        self.pacnew = []
         self.failed_phases = []
         self.failed_packages = []
         self.hint_id = ""
@@ -225,7 +213,6 @@ class State:
             "last_check": self.last_check,
             "last_update": self.last_update,
             "reboot_required": self.reboot_required,
-            "pacnew": self.pacnew,
             "failed_phases": self.failed_phases,
             "failed_packages": self.failed_packages,
             "hint_id": self.hint_id,
@@ -308,21 +295,6 @@ def _yay_env():
 
 
 
-
-def _pacnew_target(pacfile):
-    """/etc/foo.conf.pacnew -> /etc/foo.conf, or "" if it is not one of ours."""
-    for suffix in PACNEW_SUFFIXES:
-        if pacfile.endswith(suffix):
-            return pacfile[: -len(suffix)]
-    return ""
-
-
-def _read_text(path):
-    try:
-        with open(path, "rb") as handle:
-            return handle.read(MAX_DIFF_BYTES).decode("utf-8", "replace").splitlines()
-    except OSError:
-        return []
 
 
 def _is_root():
@@ -936,7 +908,6 @@ class Plugin:
                 self.state.reboot_required = self._needs_reboot(all_output)
                 if "fwupd" in phases and not self.state.reboot_required:
                     self.state.reboot_required = await self._firmware_reboot_pending()
-                self.state.pacnew = await self._find_pacnew()
                 self.state.last_update = time.time()
 
                 if self.state.failed_phases:
@@ -1039,81 +1010,7 @@ class Plugin:
         )
         return rc == 0
 
-    async def _find_pacnew(self):
-        if not _which("pacdiff"):
-            return []
-        env = _base_env()
-        env["DIFFPROG"] = "/bin/true"
-        rc, lines = await self._run(["pacdiff", "--output"], env=env, stream=False)
-        if rc != 0:
-            return []
-        return [l.strip() for l in lines if l.strip().startswith("/")]
-
     # -- frontend API ------------------------------------------------------
-
-    async def pacnew_diff(self, pacfile):
-        """Unified diff between the file in use and the new one it ships."""
-        target = _pacnew_target(pacfile)
-        if not target or pacfile not in await self._find_pacnew():
-            return {"diff": "", "error": "not_found"}
-        diff = list(
-            difflib.unified_diff(
-                _read_text(target),
-                _read_text(pacfile),
-                fromfile="current",
-                tofile="new",
-                n=2,
-                lineterm="",
-            )
-        )
-        truncated = len(diff) > MAX_DIFF_LINES
-        return {
-            "diff": "\n".join(diff[:MAX_DIFF_LINES]),
-            "truncated": truncated,
-            "error": "",
-        }
-
-    async def resolve_pacnew(self, pacfile, action):
-        """Either drop the new file, or put it in place of the current one.
-
-        Only paths pacdiff currently reports are accepted, so this cannot be
-        pointed at arbitrary files. When applying, the file in use is copied
-        into the plugin's runtime directory first and the new file inherits its
-        owner and mode.
-        """
-        target = _pacnew_target(pacfile)
-        if not target or pacfile not in await self._find_pacnew():
-            return {"ok": False, "error": "not_found"}
-
-        try:
-            if action == "keep":
-                os.remove(pacfile)
-            elif action == "apply":
-                backups = Path(decky.DECKY_PLUGIN_RUNTIME_DIR) / "config-backups"
-                backups.mkdir(parents=True, exist_ok=True)
-                stamp = int(time.time())
-                safe = target.strip("/").replace("/", "_")
-                if os.path.exists(target):
-                    shutil.copy2(target, backups / f"{safe}.{stamp}")
-                    info = os.stat(target)
-                    shutil.move(pacfile, target)
-                    os.chown(target, info.st_uid, info.st_gid)
-                    os.chmod(target, info.st_mode & 0o7777)
-                else:
-                    shutil.move(pacfile, target)
-            else:
-                return {"ok": False, "error": "bad_action"}
-        except OSError as exc:
-            decky.logger.warning("Could not resolve %s: %s", pacfile, exc)
-            return {"ok": False, "error": str(exc)}
-
-        self.state.pacnew = await self._find_pacnew()
-        self._save_state()
-        return {"ok": True, "error": "", "pacnew": self.state.pacnew}
-
-    async def refresh_pacnew(self):
-        self.state.pacnew = await self._find_pacnew()
-        return self.state.pacnew
 
     async def get_state(self):
         return self.state.to_dict()
@@ -1142,7 +1039,6 @@ class Plugin:
             ("yay", ["--version"], ()),
             ("paru", ["--version"], ()),
             ("checkupdates", None, ()),
-            ("pacdiff", None, ()),
             ("flatpak", ["--version"], ()),
             # fwupdmgr prints a compile/runtime table, not a single line.
             ("fwupdmgr", ["--version"], ("runtime", "org.freedesktop.fwupd")),

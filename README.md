@@ -58,10 +58,10 @@ system broken, so there is no cancel button on purpose.
 plugin stops and tells you instead of forcing it through. It is rare, and the
 full output tells you which package it was.
 
-**Configuration files are handled in the panel.** When a package ships a new
-default for a file you changed, it shows up under "Configuration files". Open
-it, look at what changed, and pick either version. Your old file is copied to
-the plugin's data directory first, so nothing is lost.
+**`.pacnew` files are left alone.** When a package ships a new default for a
+file you changed, pacman writes it alongside yours and the plugin ignores it,
+exactly like `cachy-update` does. Some of those files are managed by CachyOS
+itself, and replacing them can break your system.
 
 **AUR source signatures are not checked.** yay builds every package in a
 throwaway sandbox with its own empty keyring, so a PKGBUILD's signing key can

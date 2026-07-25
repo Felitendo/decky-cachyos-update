@@ -24,7 +24,6 @@ import {
 import { t, tid } from "./i18n";
 import { appendLog, clearLog, clearStatus, patchState, replaceState, useStore } from "./store";
 import { primeSettings, SettingsPanel } from "./Settings";
-import { PacnewManager } from "./PacnewManager";
 import { UpdateLog } from "./UpdateLog";
 
 const ACCENT = "#7ec8ff";
@@ -343,8 +342,6 @@ function Content() {
           )}
         </PanelSection>
       )}
-
-      <PacnewManager files={state.pacnew} />
 
       <PanelSection title={t("section.details")}>
         <PanelSectionRow>
