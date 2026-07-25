@@ -762,17 +762,68 @@ class Plugin:
             phases.append("fwupd")
         return phases
 
+    async def _repo_version(self, pkg):
+        rc, lines = await self._run(["pacman", "-Si", pkg], stream=False)
+        if rc != 0:
+            return ""
+        for line in lines:
+            if line.startswith("Version"):
+                # "Version : 1:20260707.1-1" - split once, epochs contain ":".
+                return line.split(":", 1)[1].strip()
+        return ""
+
+    async def _local_version(self, pkg):
+        rc, lines = await self._run(["pacman", "-Q", pkg], stream=False)
+        parts = lines[0].split() if rc == 0 and lines else []
+        return parts[1] if len(parts) > 1 else ""
+
+    async def _keyrings_to_upgrade(self):
+        """Keyring packages the repositories actually offer as an upgrade.
+
+        Guards against two situations seen in the wild: the package missing
+        from the repositories entirely (pacman would abort the whole
+        transaction with "target not found"), and the repository carrying an
+        older version than what is installed, which --needed does not catch
+        and which would silently downgrade the keyring.
+        """
+        upgradable = []
+        for pkg in ("archlinux-keyring", "cachyos-keyring"):
+            if not _installed(pkg):
+                continue
+            repo = await self._repo_version(pkg)
+            local = await self._local_version(pkg)
+            if not repo or not local:
+                continue
+            rc, lines = await self._run(["vercmp", local, repo], stream=False)
+            try:
+                if rc == 0 and int(lines[0].strip()) < 0:
+                    upgradable.append(pkg)
+            except (IndexError, ValueError):
+                continue
+        return upgradable
+
     async def _phase_keyring(self, **kw):
-        # Upgrading the keyring before the rest is the documented cure for the
-        # classic "invalid or corrupted package (PGP signature)" failure. Only
-        # valid as one atomic sequence with the -Su right after it, otherwise
-        # it would be a partial upgrade.
-        pkgs = [p for p in ("archlinux-keyring", "cachyos-keyring") if _installed(p)]
-        cmd = ["pacman", "-Sy", "--noconfirm", "--color", "never"]
-        if pkgs:
-            cmd += ["--needed"] + pkgs
-        rc, lines = await self._run(cmd, **kw)
-        return rc == 0, lines
+        # Refreshing the databases is the part that has to work.
+        rc, lines = await self._run(
+            ["pacman", "-Sy", "--noconfirm", "--color", "never"], **kw
+        )
+        if rc != 0:
+            return False, lines
+
+        # Upgrading the keyring first is the documented cure for "invalid or
+        # corrupted package (PGP signature)". It is only a precaution, so it
+        # must never stop the actual upgrade from happening.
+        packages = await self._keyrings_to_upgrade()
+        if packages:
+            rc, extra = await self._run(
+                ["pacman", "-S", "--needed", "--noconfirm", "--color", "never"]
+                + packages,
+                **kw,
+            )
+            lines += extra
+            if rc != 0:
+                await self._log("!! Keyring update failed, continuing anyway.")
+        return True, lines
 
     async def _phase_pacman(self, **kw):
         rc, lines = await self._run(
