@@ -18,6 +18,8 @@ const en = {
   "status.done": "All updates installed",
   "status.failed": "Update failed",
   "status.failedPhases": "Failed: {phases}",
+  "status.failedPackages": "Could not be installed: {packages}",
+  "status.logHint": "Full output: {path}",
 
   "phase.keyring": "Updating keyring",
   "phase.pacman": "Updating system packages",
@@ -142,6 +144,8 @@ const de: Record<Key, string> = {
   "status.done": "Alle Updates installiert",
   "status.failed": "Update fehlgeschlagen",
   "status.failedPhases": "Fehlgeschlagen: {phases}",
+  "status.failedPackages": "Konnte nicht installiert werden: {packages}",
+  "status.logHint": "Vollständige Ausgabe: {path}",
 
   "phase.keyring": "Schlüsselbund wird aktualisiert",
   "phase.pacman": "Systempakete werden aktualisiert",

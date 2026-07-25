@@ -26,6 +26,7 @@ export const initialState: BackendState = {
   reboot_required: false,
   pacnew: [],
   failed_phases: [],
+  failed_packages: [],
   hint_id: "",
   warnings: [],
   error_text: "",
@@ -69,6 +70,7 @@ export function clearStatus() {
   state = {
     ...state,
     failed_phases: [],
+    failed_packages: [],
     hint_id: "",
     warnings: [],
     error_text: "",

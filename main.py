@@ -65,8 +65,10 @@ if decky is None:
             base = Path(os.environ.get("TMPDIR", "/tmp")) / "decky-cachyos-update-dev"
             (base / "settings").mkdir(parents=True, exist_ok=True)
             (base / "runtime").mkdir(parents=True, exist_ok=True)
+            (base / "logs").mkdir(parents=True, exist_ok=True)
             self.DECKY_PLUGIN_SETTINGS_DIR = str(base / "settings")
             self.DECKY_PLUGIN_RUNTIME_DIR = str(base / "runtime")
+            self.DECKY_PLUGIN_LOG_DIR = str(base / "logs")
             self.DECKY_USER = os.environ.get("USER", "root")
             self.DECKY_USER_HOME = os.path.expanduser("~")
             self.DECKY_PLUGIN_VERSION = "dev"
@@ -161,6 +163,11 @@ AUR_UPDATE_RE = re.compile(r"^\S+\s+\S+\s+->\s+\S+")
 # what makes that wait understandable.
 DOWNLOAD_SIZE_RE = re.compile(r"Total Download Size:\s*([\d.]+)\s*MiB")
 
+# yay lists what it could not build under this heading, one "name - reason"
+# per line. Naming the package beats reporting the whole phase as broken.
+FAILED_HEADER = "Failed to install the following packages"
+FAILED_PKG_RE = re.compile(r"^(\S+)\s+-\s+\S")
+
 
 # --------------------------------------------------------------------------
 # state
@@ -183,6 +190,7 @@ class State:
         self.reboot_required = False
         self.pacnew = []
         self.failed_phases = []
+        self.failed_packages = []
         self.hint_id = ""
         self.warnings = []
         self.error_text = ""  # only for unexpected exceptions
@@ -204,6 +212,7 @@ class State:
             "reboot_required": self.reboot_required,
             "pacnew": self.pacnew,
             "failed_phases": self.failed_phases,
+            "failed_packages": self.failed_packages,
             "hint_id": self.hint_id,
             "warnings": self.warnings,
             "error_text": self.error_text,
@@ -370,6 +379,7 @@ class Plugin:
         self.lock = asyncio.Lock()
         self._auto_task = None
         self._dry_run = False
+        self._log_file = None
 
     # -- lifecycle ---------------------------------------------------------
 
@@ -449,9 +459,43 @@ class Plugin:
 
     # -- emitting ----------------------------------------------------------
 
+    @property
+    def _update_log_path(self):
+        base = getattr(decky, "DECKY_PLUGIN_LOG_DIR", None) or decky.DECKY_PLUGIN_RUNTIME_DIR
+        return Path(base) / "update.log"
+
+    def _open_update_log(self):
+        """Keep the full output of one run on disk.
+
+        The in-memory ring buffer only holds the last few hundred lines and is
+        gone as soon as the plugin reloads - which is exactly when someone
+        wants to look at why a build failed.
+        """
+        self._close_update_log()
+        try:
+            self._update_log_path.parent.mkdir(parents=True, exist_ok=True)
+            self._log_file = self._update_log_path.open("w", encoding="utf-8")
+        except OSError as exc:
+            decky.logger.warning("Could not open update log: %s", exc)
+            self._log_file = None
+
+    def _close_update_log(self):
+        if self._log_file:
+            try:
+                self._log_file.close()
+            except OSError:
+                pass
+            self._log_file = None
+
     async def _log(self, line):
         line = line.rstrip()
         self.state.log.append(line)
+        if self._log_file:
+            try:
+                self._log_file.write(line + "\n")
+                self._log_file.flush()
+            except OSError:
+                self._log_file = None
         await decky.emit("cachyos_update_log", line)
 
     async def _set_phase(self, phase, done_weight, total_weight):
@@ -796,10 +840,12 @@ class Plugin:
             self.state.hint_id = ""
             self.state.warnings = []
             self.state.failed_phases = []
+            self.state.failed_packages = []
             self.state.progress = 0.0
             self.state.download_mib = 0.0
             self.state.downloading = False
             self.state.update_started = time.time()
+            self._open_update_log()
             await self._set_status("updating")
 
             phases = self._enabled_phases()
@@ -845,6 +891,7 @@ class Plugin:
                 if self.state.failed_phases:
                     self.state.status = "error"
                     self.state.hint_id = self._hint_for(all_output)
+                    self.state.failed_packages = self._failed_packages(all_output)
                 else:
                     self.state.status = "done"
             except Exception as exc:
@@ -853,6 +900,7 @@ class Plugin:
                 self.state.error_text = str(exc)
             finally:
                 self._dry_run = False
+                self._close_update_log()
                 await decky.emit("cachyos_update_state", self.state.status)
                 await decky.emit(
                     "cachyos_update_finished",
@@ -870,6 +918,25 @@ class Plugin:
                 self._save_state()
 
     # -- post-update analysis ---------------------------------------------
+
+    def _failed_packages(self, lines):
+        """Names yay reported as unbuildable, in order, without duplicates."""
+        found = []
+        collecting = False
+        for line in lines:
+            if FAILED_HEADER in line:
+                collecting = True
+                continue
+            if not collecting:
+                continue
+            match = FAILED_PKG_RE.match(line.strip())
+            if match:
+                name = match.group(1)
+                if name not in found:
+                    found.append(name)
+            elif line.strip():
+                collecting = False
+        return found
 
     def _hint_for(self, lines):
         blob = "\n".join(lines).lower()
