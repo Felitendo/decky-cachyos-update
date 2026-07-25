@@ -93,6 +93,10 @@ else:
 LOG_MAX_LINES = 500
 PACMAN_LOCK = "/var/lib/pacman/db.lck"
 
+# sudo skips files in sudoers.d whose name contains a "." or ends in "~",
+# so the name deliberately has neither.
+SUDOERS_FILE = "/etc/sudoers.d/50-decky-cachyos-update"
+
 # Weight of each phase in the progress bar, roughly proportional to how long
 # each step usually takes on a handheld.
 PHASE_WEIGHTS = {
@@ -145,9 +149,8 @@ ERROR_HINTS = [
     ("ac power required", "ac_power_required"),
     ("battery level is too low", "battery_too_low"),
     ("not found (required by", "library_conflict"),
-    # yay builds under /var/cache/private, which systemd deliberately makes
-    # unreachable for unprivileged users. Any build step that resolves that
-    # real path and then executes something from it gets EACCES.
+    # Only reachable if the fallback (yay as root, sandboxed) ever runs:
+    # /var/cache/private is deliberately unreachable for unprivileged users.
     ("/var/cache/private", "aur_sandbox"),
     # makepkg runs inside systemd-run, which does not inherit the LC_ALL we
     # set, so its messages arrive in the system language. Match both, and keep
@@ -413,11 +416,14 @@ class Plugin:
                 'Backend is NOT running as root - plugin.json is missing the '
                 '"root" flag. Updates will fail.'
             )
+        # A crash or forced restart could have left the rule behind.
+        self._revoke_pacman()
         self._auto_task = asyncio.create_task(self._auto_check_loop())
 
     async def _unload(self):
         if self._auto_task:
             self._auto_task.cancel()
+        self._revoke_pacman()
         self._save_state()
         decky.logger.info("CachyOS Update backend stopped")
 
@@ -543,6 +549,65 @@ class Plugin:
     async def _set_status(self, status):
         self.state.status = status
         await decky.emit("cachyos_update_state", status)
+
+    # -- temporary pacman permission ---------------------------------------
+
+    async def _grant_pacman(self, user):
+        """Let the desktop user call pacman without a password, briefly.
+
+        Building AUR packages has to happen unprivileged, but the install step
+        pacman performs needs root. Running yay as root instead is not an
+        option: it builds inside a systemd DynamicUser sandbox whose directory
+        lives under /var/cache/private, which is unreachable for the build
+        itself, so anything that compiles fails.
+
+        The rule is therefore written just before the AUR phase and removed
+        immediately after, in a finally block, on plugin start and on unload.
+        It is scoped to pacman, but note that this still amounts to root for
+        the duration - pacman can install arbitrary packages, and package
+        scripts run as root.
+        """
+        staging = Path(decky.DECKY_PLUGIN_RUNTIME_DIR) / "sudoers-staging"
+        try:
+            staging.write_text(f"{user} ALL=(root) NOPASSWD: /usr/bin/pacman\n")
+            staging.chmod(0o440)
+        except OSError as exc:
+            decky.logger.error("Could not stage sudoers rule: %s", exc)
+            return False
+
+        # A malformed file in sudoers.d breaks sudo for everything, so never
+        # install one that visudo has not accepted.
+        rc, lines = await self._run(
+            ["visudo", "-c", "-f", str(staging)], stream=False
+        )
+        if rc != 0:
+            decky.logger.error("Refusing invalid sudoers rule: %s", " ".join(lines))
+            staging.unlink(missing_ok=True)
+            return False
+
+        try:
+            shutil.copyfile(staging, SUDOERS_FILE)
+            os.chown(SUDOERS_FILE, 0, 0)
+            os.chmod(SUDOERS_FILE, 0o440)
+        except OSError as exc:
+            decky.logger.error("Could not install sudoers rule: %s", exc)
+            self._revoke_pacman()
+            return False
+        finally:
+            staging.unlink(missing_ok=True)
+        return True
+
+    def _revoke_pacman(self):
+        try:
+            os.remove(SUDOERS_FILE)
+            decky.logger.info("Temporary pacman permission removed")
+        except FileNotFoundError:
+            pass
+        except OSError as exc:
+            decky.logger.error(
+                "COULD NOT REMOVE %s - please delete it manually: %s",
+                SUDOERS_FILE, exc,
+            )
 
     # -- process runner ----------------------------------------------------
 
@@ -840,20 +905,28 @@ class Plugin:
         return rc == 0, lines
 
     async def _phase_aur(self, **kw):
-        cmd = [
+        args = [
             _which("yay") or "yay", "-Syu", "--noconfirm", "--removemake",
             "--noprogressbar", "--color", "never",
-            # Builds run inside `systemd-run -p DynamicUser=yes`, whose HOME is
-            # a fresh private /tmp for every single step. yay imports a
-            # PKGBUILD's validpgpkeys in one step and makepkg verifies in the
-            # next - against an empty keyring - so those packages could never
-            # be built here. The source checksums from the PKGBUILD are still
-            # verified; only the upstream signature is not. yay itself already
-            # passes --skippgpcheck for its own source download step
-            # (pkg/sync/workdir/aur_source.go).
-            "--mflags", "--skippgpcheck",
+            # Fail fast instead of blocking on a password prompt that no one
+            # can answer if the sudoers rule did not take effect.
+            "--sudoflags", "-n",
         ]
-        rc, lines = await self._run(cmd, env=_yay_env(), **kw)
+        cmd, env = _user_cmd(args)
+
+        user, _ = _desktop_user()
+        granted = False
+        if _is_root() and user:
+            granted = await self._grant_pacman(user)
+            if not granted:
+                await self._log("!! Could not grant pacman access - skipping AUR.")
+                return False, []
+
+        try:
+            rc, lines = await self._run(cmd, env=env, **kw)
+        finally:
+            if granted:
+                self._revoke_pacman()
         return rc == 0, lines
 
     async def _phase_flatpak_system(self, **kw):
@@ -1098,6 +1171,8 @@ class Plugin:
             # fwupdmgr prints a compile/runtime table, not a single line.
             ("fwupdmgr", ["--version"], ("runtime", "org.freedesktop.fwupd")),
             ("runuser", None, ()),
+            ("sudo", None, ()),
+            ("visudo", None, ()),
             ("systemd-run", ["--version"], ()),
             ("fakeroot", None, ()),
         ):

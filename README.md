@@ -63,15 +63,12 @@ file you changed, pacman writes it alongside yours and the plugin ignores it,
 exactly like `cachy-update` does. Some of those files are managed by CachyOS
 itself, and replacing them can break your system.
 
-**AUR source signatures are not checked.** yay builds every package in a
-throwaway sandbox with its own empty keyring, so a PKGBUILD's signing key can
-never be imported. The checksums in the PKGBUILD are still verified.
-
 **Firmware is off by default.** A failed firmware update cannot be undone, so
 you have to switch it on yourself if you want it.
 
 **No password is stored anywhere.** The plugin runs with the permissions Decky
-already has, so it never needs to ask.
+already has, so it never needs to ask. See below for how AUR builds get their
+permissions.
 
 ## Something went wrong
 
@@ -100,8 +97,19 @@ To add a language, add one dictionary to [`src/i18n.ts`](src/i18n.ts). The
 backend only returns ids, never text, so that file is the only place with
 wording in it.
 
-## Why yay and not paru
+## How AUR packages get built
 
-`paru` refuses to run as root and offers no way around it. `yay` handles it
-properly: it runs pacman directly and drops privileges for building packages.
-That is why this plugin does not need to touch your sudo configuration.
+Building has to happen as your user, installing has to happen as root. yay can
+run as root and sandbox the build itself, but that sandbox puts the build
+directory under `/var/cache/private`, which the build is not allowed to run
+programs from, so anything that actually compiles fails there.
+
+So the plugin runs yay as you, and grants passwordless pacman access for the
+length of the update by writing `/etc/sudoers.d/50-decky-cachyos-update`. The
+file is checked with `visudo` before it is installed, because a broken file
+there would break `sudo` completely. It is removed right afterwards, and again
+when the plugin starts and stops, so a crash cannot leave it behind.
+
+Worth knowing what that means: while an update runs, your user can call pacman
+as root without a password. It is a short window that you started yourself, but
+it is real.
