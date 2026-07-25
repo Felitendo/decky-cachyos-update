@@ -142,6 +142,7 @@ ERROR_HINTS = [
     ("not authorized", "polkit_denied"),
     ("ac power required", "ac_power_required"),
     ("battery level is too low", "battery_too_low"),
+    ("not found (required by", "library_conflict"),
 ]
 
 PROGRESS_RE = re.compile(r"\(\s*(\d+)\s*/\s*(\d+)\s*\)")
@@ -208,8 +209,31 @@ def _which(binary):
 
 
 def _base_env():
-    """Deterministic, non-interactive environment for every child process."""
+    """Deterministic, non-interactive environment for every child process.
+
+    Decky's plugin_loader is a PyInstaller one-file bundle. It unpacks its own
+    copies of libssl, libcrypto and friends into /tmp/_MEIxxxxxx and points
+    LD_LIBRARY_PATH at that directory. Every system binary started from here
+    would then load those instead of the real ones, and pacman dies with
+    "version `OPENSSL_3.2.0' not found (required by libcurl.so.4)".
+
+    PyInstaller keeps the original values in *_ORIG, so they can be restored.
+    """
     env = dict(os.environ)
+
+    for name in ("LD_LIBRARY_PATH", "LD_PRELOAD"):
+        original = env.pop(f"{name}_ORIG", None)
+        if original:
+            env[name] = original
+        else:
+            env.pop(name, None)
+
+    # Catch anything else still pointing into the bundle (PYTHONHOME,
+    # SSL_CERT_FILE, ...) - the temp dir name is the reliable marker.
+    for key in [k for k, v in env.items() if isinstance(v, str) and "/_MEI" in v]:
+        env.pop(key, None)
+    env.pop("_MEIPASS2", None)
+
     # C.UTF-8 keeps pacman's error strings parseable regardless of the user's
     # locale - the ERROR_HINTS matching below relies on the English wording.
     env["LC_ALL"] = "C.UTF-8"

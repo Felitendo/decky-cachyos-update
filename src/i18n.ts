@@ -95,6 +95,8 @@ const en = {
   "hint.ac_power_required":
     "This firmware update requires the power adapter to be connected.",
   "hint.battery_too_low": "Battery level is too low for a firmware update.",
+  "hint.library_conflict":
+    "A system tool loaded the wrong libraries and could not start. Restarting Decky (or the device) usually fixes this.",
 
   "warning.missing_checkupdates":
     "checkupdates is missing (install the 'pacman-contrib' package).",
@@ -215,6 +217,8 @@ const de: Record<Key, string> = {
   "hint.ac_power_required":
     "Für dieses Firmware-Update muss das Netzteil angeschlossen sein.",
   "hint.battery_too_low": "Der Akkustand ist für ein Firmware-Update zu niedrig.",
+  "hint.library_conflict":
+    "Ein Systemwerkzeug hat die falschen Bibliotheken geladen und konnte nicht starten. Ein Neustart von Decky (oder des Geräts) behebt das meistens.",
 
   "warning.missing_checkupdates":
     "checkupdates fehlt (Paket 'pacman-contrib' installieren).",
