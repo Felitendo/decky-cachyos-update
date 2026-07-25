@@ -145,6 +145,10 @@ ERROR_HINTS = [
     ("ac power required", "ac_power_required"),
     ("battery level is too low", "battery_too_low"),
     ("not found (required by", "library_conflict"),
+    # yay builds under /var/cache/private, which systemd deliberately makes
+    # unreachable for unprivileged users. Any build step that resolves that
+    # real path and then executes something from it gets EACCES.
+    ("/var/cache/private", "aur_sandbox"),
     # makepkg runs inside systemd-run, which does not inherit the LC_ALL we
     # set, so its messages arrive in the system language. Match both, and keep
     # a bare "pgp" as a last resort for any other locale.

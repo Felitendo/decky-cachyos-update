@@ -97,6 +97,8 @@ const en = {
   "hint.battery_too_low": "Battery level is too low for a firmware update.",
   "hint.aur_pgp":
     "An AUR package could not verify its sources with a PGP key. Try the update once more - the key is kept from now on. If it keeps failing, update that package in desktop mode.",
+  "hint.aur_sandbox":
+    "This AUR package has to be compiled, and the isolated directory it is built in does not allow running the helper programs it needs. Update it in desktop mode with \"yay -S <name>\". Everything else was updated.",
   "hint.library_conflict":
     "A system tool loaded the wrong libraries and could not start. Restarting Decky (or the device) usually fixes this.",
 
@@ -221,6 +223,8 @@ const de: Record<Key, string> = {
   "hint.battery_too_low": "Der Akkustand ist für ein Firmware-Update zu niedrig.",
   "hint.aur_pgp":
     "Ein AUR-Paket konnte seine Quellen nicht per PGP prüfen. Versuch das Update noch einmal - der Schlüssel bleibt ab jetzt erhalten. Wenn es weiterhin fehlschlägt, aktualisiere das Paket im Desktop-Modus.",
+  "hint.aur_sandbox":
+    "Dieses AUR-Paket muss kompiliert werden, und im abgeschotteten Bauverzeichnis dürfen die dafür nötigen Hilfsprogramme nicht ausgeführt werden. Bitte im Desktop-Modus mit \"yay -S <name>\" aktualisieren. Alles andere wurde aktualisiert.",
   "hint.library_conflict":
     "Ein Systemwerkzeug hat die falschen Bibliotheken geladen und konnte nicht starten. Ein Neustart von Decky (oder des Geräts) behebt das meistens.",
 
