@@ -55,8 +55,17 @@ tools it found.
 system broken, so there is no cancel button on purpose.
 
 **Sometimes an update needs you.** If two packages disagree about a file, the
-plugin stops and tells you instead of forcing it through. Those cases have to
-be sorted out in desktop mode. It is rare.
+plugin stops and tells you instead of forcing it through. It is rare, and the
+full output tells you which package it was.
+
+**Configuration files are handled in the panel.** When a package ships a new
+default for a file you changed, it shows up under "Configuration files". Open
+it, look at what changed, and pick either version. Your old file is copied to
+the plugin's data directory first, so nothing is lost.
+
+**AUR source signatures are not checked.** yay builds every package in a
+throwaway sandbox with its own empty keyring, so a PKGBUILD's signing key can
+never be imported. The checksums in the PKGBUILD are still verified.
 
 **Firmware is off by default.** A failed firmware update cannot be undone, so
 you have to switch it on yourself if you want it.

@@ -68,10 +68,18 @@ const en = {
   "reboot.ok": "Restart",
   "reboot.cancel": "Later",
 
-  "pacnew.one":
-    "1 configuration file (.pacnew) needs attention. This can only be handled in desktop mode.",
-  "pacnew.many":
-    "{n} configuration files (.pacnew) need attention. This can only be handled in desktop mode.",
+  "pacnew.section": "Configuration files",
+  "pacnew.introOne":
+    "1 file ships a new default version. Open it to see what changed and pick one.",
+  "pacnew.intro":
+    "{n} files ship a new default version. Open one to see what changed and pick one.",
+  "pacnew.legend": "Red lines are yours, green lines are the new version.",
+  "pacnew.apply": "Use new version",
+  "pacnew.keep": "Keep mine",
+  "pacnew.cancel": "Decide later",
+  "pacnew.noDiff": "Both files are identical.",
+  "pacnew.truncated": "Shortened - only the first differences are shown.",
+  "pacnew.failed": "Could not change the file",
 
   "reason.already_running": "Another operation is already running.",
   "reason.not_root":
@@ -196,10 +204,18 @@ const de: Record<Key, string> = {
   "reboot.ok": "Neu starten",
   "reboot.cancel": "Später",
 
-  "pacnew.one":
-    "1 Konfigurationsdatei (.pacnew) braucht Aufmerksamkeit. Das lässt sich nur im Desktop-Modus erledigen.",
-  "pacnew.many":
-    "{n} Konfigurationsdateien (.pacnew) brauchen Aufmerksamkeit. Das lässt sich nur im Desktop-Modus erledigen.",
+  "pacnew.section": "Konfigurationsdateien",
+  "pacnew.introOne":
+    "1 Datei bringt eine neue Standardfassung mit. Öffne sie, um die Unterschiede zu sehen und dich zu entscheiden.",
+  "pacnew.intro":
+    "{n} Dateien bringen eine neue Standardfassung mit. Öffne eine, um die Unterschiede zu sehen und dich zu entscheiden.",
+  "pacnew.legend": "Rote Zeilen sind deine, grüne die der neuen Fassung.",
+  "pacnew.apply": "Neue übernehmen",
+  "pacnew.keep": "Meine behalten",
+  "pacnew.cancel": "Später entscheiden",
+  "pacnew.noDiff": "Beide Dateien sind identisch.",
+  "pacnew.truncated": "Gekürzt - es werden nur die ersten Unterschiede gezeigt.",
+  "pacnew.failed": "Die Datei konnte nicht geändert werden",
 
   "reason.already_running": "Es läuft bereits ein Vorgang.",
   "reason.not_root":

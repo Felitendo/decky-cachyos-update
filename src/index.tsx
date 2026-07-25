@@ -24,6 +24,7 @@ import {
 import { t, tid } from "./i18n";
 import { appendLog, clearLog, clearStatus, patchState, replaceState, useStore } from "./store";
 import { primeSettings, SettingsPanel } from "./Settings";
+import { PacnewManager } from "./PacnewManager";
 import { UpdateLog } from "./UpdateLog";
 
 const ACCENT = "#7ec8ff";
@@ -301,15 +302,6 @@ function Content() {
           </PanelSectionRow>
         )}
 
-        {state.pacnew.length > 0 && (
-          <PanelSectionRow>
-            <Note>
-              {state.pacnew.length === 1
-                ? t("pacnew.one")
-                : t("pacnew.many", { n: state.pacnew.length })}
-            </Note>
-          </PanelSectionRow>
-        )}
       </PanelSection>
 
       {state.total > 0 && state.status === "idle" && (
@@ -351,6 +343,8 @@ function Content() {
           )}
         </PanelSection>
       )}
+
+      <PacnewManager files={state.pacnew} />
 
       <PanelSection title={t("section.details")}>
         <PanelSectionRow>

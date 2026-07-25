@@ -89,3 +89,15 @@ export interface ProgressEvent {
   download_mib: number;
   downloading: boolean;
 }
+
+export const pacnewDiff = callable<
+  [pacfile: string],
+  { diff: string; truncated: boolean; error: string }
+>("pacnew_diff");
+
+export const resolvePacnew = callable<
+  [pacfile: string, action: "keep" | "apply"],
+  { ok: boolean; error: string; pacnew: string[] }
+>("resolve_pacnew");
+
+export const refreshPacnew = callable<[], string[]>("refresh_pacnew");

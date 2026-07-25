@@ -18,9 +18,9 @@ Decky installed:
 """
 
 import asyncio
+import difflib
 import json
 import os
-import pwd
 import re
 import shutil
 import sys
@@ -172,6 +172,12 @@ AUR_UPDATE_RE = re.compile(r"^\S+\s+\S+\s+->\s+\S+")
 # what makes that wait understandable.
 DOWNLOAD_SIZE_RE = re.compile(r"Total Download Size:\s*([\d.]+)\s*MiB")
 
+# pacdiff reports the new file, e.g. /etc/foo.conf.pacnew. .pacsave shows up
+# after a package was removed.
+PACNEW_SUFFIXES = (".pacnew", ".pacsave")
+MAX_DIFF_LINES = 400
+MAX_DIFF_BYTES = 512 * 1024
+
 # yay lists what it could not build under this heading, one "name - reason"
 # per line. Naming the package beats reporting the whole phase as broken.
 FAILED_HEADER = "Failed to install the following packages"
@@ -275,63 +281,48 @@ def _base_env():
     return env
 
 
-def _aur_build_env():
-    """Environment and extra arguments that let yay build properly as root.
+def _yay_env():
+    """Environment for yay when it runs as root.
 
-    yay de-elevates makepkg one of two ways (cmd_builder.go, deElevateCommand):
+    yay de-elevates makepkg/git/gpg in one of two ways
+    (pkg/settings/exe/cmd_builder.go, deElevateCommand):
 
-    - Without SUDO_USER it wraps every step in
-      `systemd-run -p DynamicUser=yes -E HOME=/tmp`. DynamicUser implies
-      PrivateTmp, so *each* step gets its own /tmp. yay imports a PKGBUILD's
-      validpgpkeys into /tmp/.gnupg in one step, and makepkg then verifies
-      signatures in the next one - against an empty keyring. Any package using
-      validpgpkeys fails forever, no matter how often it is retried.
+    - With SUDO_USER set it sets cmd.SysProcAttr.Credential to that user.
+      **This path is broken in yay 13.0.1**: OSRunner.Show() and Capture() in
+      pkg/settings/exe/exec.go then do `cmd.SysProcAttr = &syscall.SysProcAttr{
+      Pdeathsig: ...}`, throwing the Credential away. makepkg ends up running
+      as root and aborts with "Running makepkg as root is not allowed"
+      (exit 10). Do not set SUDO_USER here - it makes every AUR build fail.
 
-    - With SUDO_USER set it simply switches uid/gid on the child process and
-      passes the environment through. That is the same thing a plain `yay` run
-      in a terminal does, and it lets us hand it a GNUPGHOME that survives.
-
-    So the second path is used whenever the desktop user can be resolved. It
-    needs a build directory that user can write to: with SUDO_USER set,
-    getCacheHome() would pick /tmp/yay and create it root-owned, hence the
-    explicit --builddir.
-
-    Returns (env, extra_args). Falls back to the sandboxed path unchanged if
-    the user cannot be resolved or the directories cannot be prepared.
+    - Without it, yay wraps each step in `systemd-run -p DynamicUser=yes`,
+      which replaces the command rather than SysProcAttr and therefore
+      survives. That is the working path, so keep SUDO_USER unset. It also
+      means the build directory must stay /var/cache/yay, which systemd
+      creates via CacheDirectory=yay.
     """
     env = _base_env()
     for key in ("SUDO_USER", "DOAS_USER", "SUDO_UID", "SUDO_GID"):
         env.pop(key, None)
+    return env
 
-    user, home = _desktop_user()
-    if not (_is_root() and user and home):
-        return env, []
 
+
+
+
+def _pacnew_target(pacfile):
+    """/etc/foo.conf.pacnew -> /etc/foo.conf, or "" if it is not one of ours."""
+    for suffix in PACNEW_SUFFIXES:
+        if pacfile.endswith(suffix):
+            return pacfile[: -len(suffix)]
+    return ""
+
+
+def _read_text(path):
     try:
-        account = pwd.getpwnam(user)
-    except KeyError:
-        decky.logger.warning("Unknown user %s, building AUR packages sandboxed", user)
-        return env, []
-
-    base = Path(home) / ".cache" / "decky-cachyos-update"
-    build, gnupg, build_home = base / "build", base / "gnupg", base / "home"
-    try:
-        for directory, mode in (
-            (base, 0o755), (build, 0o755), (build_home, 0o755),
-            # gpg refuses to use a home directory others can read.
-            (gnupg, 0o700),
-        ):
-            directory.mkdir(parents=True, exist_ok=True)
-            os.chown(directory, account.pw_uid, account.pw_gid)
-            directory.chmod(mode)
-    except OSError as exc:
-        decky.logger.warning("Could not prepare AUR build dirs: %s", exc)
-        return env, []
-
-    env["SUDO_USER"] = user
-    env["HOME"] = str(build_home)
-    env["GNUPGHOME"] = str(gnupg)
-    return env, ["--builddir", str(build)]
+        with open(path, "rb") as handle:
+            return handle.read(MAX_DIFF_BYTES).decode("utf-8", "replace").splitlines()
+    except OSError:
+        return []
 
 
 def _is_root():
@@ -822,12 +813,20 @@ class Plugin:
         return rc == 0, lines
 
     async def _phase_aur(self, **kw):
-        env, extra = _aur_build_env()
         cmd = [
             _which("yay") or "yay", "-Syu", "--noconfirm", "--removemake",
             "--noprogressbar", "--color", "never",
-        ] + extra
-        rc, lines = await self._run(cmd, env=env, **kw)
+            # Builds run inside `systemd-run -p DynamicUser=yes`, whose HOME is
+            # a fresh private /tmp for every single step. yay imports a
+            # PKGBUILD's validpgpkeys in one step and makepkg verifies in the
+            # next - against an empty keyring - so those packages could never
+            # be built here. The source checksums from the PKGBUILD are still
+            # verified; only the upstream signature is not. yay itself already
+            # passes --skippgpcheck for its own source download step
+            # (pkg/sync/workdir/aur_source.go).
+            "--mflags", "--skippgpcheck",
+        ]
+        rc, lines = await self._run(cmd, env=_yay_env(), **kw)
         return rc == 0, lines
 
     async def _phase_flatpak_system(self, **kw):
@@ -1051,6 +1050,70 @@ class Plugin:
         return [l.strip() for l in lines if l.strip().startswith("/")]
 
     # -- frontend API ------------------------------------------------------
+
+    async def pacnew_diff(self, pacfile):
+        """Unified diff between the file in use and the new one it ships."""
+        target = _pacnew_target(pacfile)
+        if not target or pacfile not in await self._find_pacnew():
+            return {"diff": "", "error": "not_found"}
+        diff = list(
+            difflib.unified_diff(
+                _read_text(target),
+                _read_text(pacfile),
+                fromfile="current",
+                tofile="new",
+                n=2,
+                lineterm="",
+            )
+        )
+        truncated = len(diff) > MAX_DIFF_LINES
+        return {
+            "diff": "\n".join(diff[:MAX_DIFF_LINES]),
+            "truncated": truncated,
+            "error": "",
+        }
+
+    async def resolve_pacnew(self, pacfile, action):
+        """Either drop the new file, or put it in place of the current one.
+
+        Only paths pacdiff currently reports are accepted, so this cannot be
+        pointed at arbitrary files. When applying, the file in use is copied
+        into the plugin's runtime directory first and the new file inherits its
+        owner and mode.
+        """
+        target = _pacnew_target(pacfile)
+        if not target or pacfile not in await self._find_pacnew():
+            return {"ok": False, "error": "not_found"}
+
+        try:
+            if action == "keep":
+                os.remove(pacfile)
+            elif action == "apply":
+                backups = Path(decky.DECKY_PLUGIN_RUNTIME_DIR) / "config-backups"
+                backups.mkdir(parents=True, exist_ok=True)
+                stamp = int(time.time())
+                safe = target.strip("/").replace("/", "_")
+                if os.path.exists(target):
+                    shutil.copy2(target, backups / f"{safe}.{stamp}")
+                    info = os.stat(target)
+                    shutil.move(pacfile, target)
+                    os.chown(target, info.st_uid, info.st_gid)
+                    os.chmod(target, info.st_mode & 0o7777)
+                else:
+                    shutil.move(pacfile, target)
+            else:
+                return {"ok": False, "error": "bad_action"}
+        except OSError as exc:
+            decky.logger.warning("Could not resolve %s: %s", pacfile, exc)
+            return {"ok": False, "error": str(exc)}
+
+        self.state.pacnew = await self._find_pacnew()
+        self._save_state()
+        return {"ok": True, "error": "", "pacnew": self.state.pacnew}
+
+    async def refresh_pacnew(self):
+        self.state.pacnew = await self._find_pacnew()
+        return self.state.pacnew
 
     async def get_state(self):
         return self.state.to_dict()
