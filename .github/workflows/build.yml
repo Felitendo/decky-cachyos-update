@@ -1,0 +1,52 @@
+name: Build & Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --no-frozen-lockfile
+
+      - name: Build frontend
+        run: pnpm run build
+
+      - name: Check backend syntax
+        run: python3 -m py_compile main.py
+
+      - name: Assemble plugin
+        run: |
+          mkdir -p out/CachyOSUpdate
+          cp -r plugin.json package.json main.py dist README.md LICENSE out/CachyOSUpdate/
+          cd out && zip -r CachyOSUpdate.zip CachyOSUpdate
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: CachyOSUpdate
+          path: out/CachyOSUpdate.zip
+
+      - name: Attach to release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: out/CachyOSUpdate.zip
+          generate_release_notes: true

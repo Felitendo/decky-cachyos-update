@@ -1,0 +1,11 @@
+{
+  "name": "CachyOS Update",
+  "author": "Felitendo",
+  "flags": ["root"],
+  "api_version": 1,
+  "publish": {
+    "tags": ["system", "update", "cachyos", "arch", "root"],
+    "description": "Aktualisiert CachyOS direkt im Gamemode: Pacman-Repos, AUR, Flatpak und optional Firmware - ohne Desktop-Modus, ohne Terminal, ohne Passwort.",
+    "image": "https://opengraph.githubassets.com/1/Felitendo/decky-cachyos-update"
+  }
+}

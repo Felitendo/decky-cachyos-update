@@ -1,0 +1,47 @@
+{
+  "name": "decky-cachyos-update",
+  "version": "0.0.1",
+  "description": "Update CachyOS from Gamemode - pacman, AUR, Flatpak and firmware in one button.",
+  "type": "module",
+  "scripts": {
+    "build": "rollup -c",
+    "watch": "rollup -c -w"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Felitendo/decky-cachyos-update.git"
+  },
+  "keywords": [
+    "decky",
+    "plugin",
+    "steam-deck",
+    "cachyos",
+    "arch",
+    "pacman",
+    "update"
+  ],
+  "author": "Felitendo",
+  "license": "BSD-3-Clause",
+  "bugs": {
+    "url": "https://github.com/Felitendo/decky-cachyos-update/issues"
+  },
+  "homepage": "https://github.com/Felitendo/decky-cachyos-update#readme",
+  "devDependencies": {
+    "@decky/rollup": "^1.0.2",
+    "@decky/ui": "^4.11.0",
+    "@types/react": "19.1.1",
+    "@types/react-dom": "19.1.1",
+    "rollup": "^4.53.3",
+    "typescript": "^5.6.2"
+  },
+  "dependencies": {
+    "@decky/api": "^1.1.3",
+    "react-icons": "^5.3.0",
+    "tslib": "^2.7.0"
+  },
+  "pnpm": {
+    "peerDependencyRules": {
+      "ignoreMissing": ["react", "react-dom"]
+    }
+  }
+}
