@@ -99,6 +99,7 @@ let settings: Settings = {
   enable_aur: true,
   enable_flatpak: true,
   enable_fwupd: false,
+  aur_skip_pgp: false,
   auto_check: true,
   check_interval_hours: 6,
   notify_on_updates: true,

@@ -108,6 +108,7 @@ DEFAULT_SETTINGS = {
     "enable_aur": True,
     "enable_flatpak": True,
     "enable_fwupd": False,
+    "aur_skip_pgp": False,
     "auto_check": True,
     "check_interval_hours": 6,
     "notify_on_updates": True,
@@ -145,6 +146,14 @@ ERROR_HINTS = [
     ("ac power required", "ac_power_required"),
     ("battery level is too low", "battery_too_low"),
     ("not found (required by", "library_conflict"),
+    # makepkg runs inside systemd-run, which does not inherit the LC_ALL we
+    # set, so its messages arrive in the system language. Match both, and keep
+    # a bare "pgp" as a last resort for any other locale.
+    ("one or more pgp signatures could not be verified", "aur_pgp"),
+    ("pgp-signaturen konnten nicht", "aur_pgp"),
+    ("unknown public key", "aur_pgp"),
+    ("unbekannter \u00f6ffentlicher schl\u00fcssel", "aur_pgp"),
+    ("pgp", "aur_pgp"),
 ]
 
 PROGRESS_RE = re.compile(r"\(\s*(\d+)\s*/\s*(\d+)\s*\)")
@@ -768,14 +777,18 @@ class Plugin:
         return rc == 0, lines
 
     async def _phase_aur(self, **kw):
-        rc, lines = await self._run(
-            [
-                _which("yay") or "yay", "-Syu", "--noconfirm", "--removemake",
-                "--noprogressbar", "--color", "never",
-            ],
-            env=_yay_env(),
-            **kw,
-        )
+        cmd = [
+            _which("yay") or "yay", "-Syu", "--noconfirm", "--removemake",
+            "--noprogressbar", "--color", "never",
+        ]
+        if self.settings.get("aur_skip_pgp"):
+            # yay builds through `systemd-run -p DynamicUser=yes`, whose HOME
+            # is a fresh private /tmp on every invocation. A PKGBUILD's
+            # validpgpkeys can therefore never be imported and packages using
+            # them fail forever. Skipping the PGP step is the only way to
+            # build them this way; the PKGBUILD's own checksums still apply.
+            cmd += ["--mflags", "--skippgpcheck"]
+        rc, lines = await self._run(cmd, env=_yay_env(), **kw)
         return rc == 0, lines
 
     async def _phase_flatpak_system(self, **kw):

@@ -99,6 +99,8 @@ const en = {
   "hint.ac_power_required":
     "This firmware update requires the power adapter to be connected.",
   "hint.battery_too_low": "Battery level is too low for a firmware update.",
+  "hint.aur_pgp":
+    "An AUR package verifies its sources with a PGP key that cannot be imported here, because each build runs in a fresh sandbox. Turn on \"Skip PGP check\" in the settings to build it anyway, or update that package in desktop mode.",
   "hint.library_conflict":
     "A system tool loaded the wrong libraries and could not start. Restarting Decky (or the device) usually fixes this.",
 
@@ -109,6 +111,9 @@ const en = {
 
   "settings.aur": "AUR packages",
   "settings.aurDesc": "Updates AUR packages using yay.",
+  "settings.skipPgp": "Skip PGP check for AUR builds",
+  "settings.skipPgpDesc":
+    "Needed for AUR packages that verify their sources with a PGP key. The package's own checksums are still verified. Off by default.",
   "settings.flatpak": "Flatpaks",
   "settings.flatpakDesc": "System and user Flatpaks.",
   "settings.fwupd": "Firmware (fwupd)",
@@ -225,6 +230,8 @@ const de: Record<Key, string> = {
   "hint.ac_power_required":
     "Für dieses Firmware-Update muss das Netzteil angeschlossen sein.",
   "hint.battery_too_low": "Der Akkustand ist für ein Firmware-Update zu niedrig.",
+  "hint.aur_pgp":
+    "Ein AUR-Paket prüft seine Quellen mit einem PGP-Schlüssel, der sich hier nicht importieren lässt, weil jeder Bau in einer frischen Sandbox läuft. Schalte in den Einstellungen \"PGP-Prüfung überspringen\" ein, um es trotzdem zu bauen, oder aktualisiere das Paket im Desktop-Modus.",
   "hint.library_conflict":
     "Ein Systemwerkzeug hat die falschen Bibliotheken geladen und konnte nicht starten. Ein Neustart von Decky (oder des Geräts) behebt das meistens.",
 
@@ -235,6 +242,9 @@ const de: Record<Key, string> = {
 
   "settings.aur": "AUR-Pakete",
   "settings.aurDesc": "Aktualisiert AUR-Pakete mit yay.",
+  "settings.skipPgp": "PGP-Prüfung bei AUR-Paketen überspringen",
+  "settings.skipPgpDesc":
+    "Nötig für AUR-Pakete, die ihre Quellen mit einem PGP-Schlüssel prüfen. Die Prüfsummen des Pakets werden weiterhin geprüft. Standardmäßig aus.",
   "settings.flatpak": "Flatpaks",
   "settings.flatpakDesc": "System- und Benutzer-Flatpaks.",
   "settings.fwupd": "Firmware (fwupd)",

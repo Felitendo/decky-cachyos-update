@@ -58,6 +58,11 @@ system broken, so there is no cancel button on purpose.
 plugin stops and tells you instead of forcing it through. Those cases have to
 be sorted out in desktop mode. It is rare.
 
+**Some AUR packages need one extra setting.** A few check their sources with a
+PGP key. Building happens in a fresh sandbox every time, so that key can never
+be imported and those packages always fail. If you hit this, turn on **Skip PGP
+check** in the settings. The package's own checksums are still verified.
+
 **Firmware is off by default.** A failed firmware update cannot be undone, so
 you have to switch it on yourself if you want it.
 
@@ -66,11 +71,11 @@ already has, so it never needs to ask.
 
 ## Something went wrong
 
-Run the self-test in the settings first. If that looks fine, the log file is
-here:
+Run the self-test in the settings first. If that looks fine, the full output of
+the last update is here:
 
 ```
-~/homebrew/logs/CachyOSUpdate/plugin.log
+~/homebrew/logs/CachyOSUpdate/update.log
 ```
 
 ## For developers

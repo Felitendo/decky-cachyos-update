@@ -1,5 +1,4 @@
-import { Focusable, ScrollPanelGroup } from "@decky/ui";
-import { useEffect, useRef } from "react";
+import { Focusable } from "@decky/ui";
 import { t } from "./i18n";
 
 interface Props {
@@ -7,18 +6,14 @@ interface Props {
 }
 
 /**
- * Gamepad-scrollable live log.
+ * Live log that stays pinned to the newest line.
  *
- * ScrollPanelGroup only scrolls with a controller when its children are
- * focusable, hence the inner Focusable with flow-children="column".
+ * `flex-direction: column-reverse` makes the browser treat the bottom as the
+ * scroll origin, so new output stays visible without any scripted scrolling.
+ * That matters: calling scrollIntoView() here also scrolled the surrounding
+ * Quick Access panel, yanking the whole page down on every line.
  */
 export function UpdateLog({ lines }: Props) {
-  const bottomRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ block: "end" });
-  }, [lines.length]);
-
   if (!lines.length) {
     return (
       <div style={{ fontSize: "12px", opacity: 0.6, padding: "4px 0" }}>
@@ -28,16 +23,20 @@ export function UpdateLog({ lines }: Props) {
   }
 
   return (
-    <ScrollPanelGroup
-      // @ts-ignore - Steam's scroll panel accepts style passthrough
+    <Focusable
+      // @ts-ignore - Focusable forwards unknown props onto its div
       style={{
+        display: "flex",
+        flexDirection: "column-reverse",
+        overflowY: "auto",
         height: "220px",
         background: "rgba(0, 0, 0, 0.35)",
         borderRadius: "4px",
         padding: "6px 8px",
       }}
+      noFocusRing
     >
-      <Focusable flow-children="column" noFocusRing>
+      <div>
         {lines.map((line, index) => (
           <div
             key={index}
@@ -53,9 +52,8 @@ export function UpdateLog({ lines }: Props) {
             {line}
           </div>
         ))}
-        <div ref={bottomRef} />
-      </Focusable>
-    </ScrollPanelGroup>
+      </div>
+    </Focusable>
   );
 }
 

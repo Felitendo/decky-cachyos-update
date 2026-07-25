@@ -196,9 +196,9 @@ function Content() {
     const result = await startUpdate(false);
     if (!result.started) {
       setReasonId(result.reason_id);
-      return;
     }
-    setShowLog(true);
+    // The log stays collapsed on purpose: opening it pushes everything else
+    // off screen, and most runs need no attention at all.
   };
 
   const onReboot = () => {
