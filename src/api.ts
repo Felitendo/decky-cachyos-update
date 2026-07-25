@@ -48,6 +48,7 @@ export interface Settings {
   auto_check: boolean;
   check_interval_hours: number;
   notify_on_updates: boolean;
+  notify_threshold: number; // minimum number of updates before notifying
 }
 
 export interface ToolInfo {

@@ -118,6 +118,11 @@ const en = {
   "settings.autoCheckDesc":
     "Checks in the background every few hours. Nothing is ever installed on its own.",
   "settings.notify": "Notify when updates are available",
+  "settings.notifyThreshold": "Notify from",
+  "settings.notifyThresholdDesc":
+    "Only notifies once at least this many updates are waiting.",
+  "settings.notifyThresholdOne": "1 package",
+  "settings.notifyThresholdOption": "{n} packages",
 
   "selftest.rootOk": "Running as root - correct.",
   "selftest.rootBad": 'NOT running as root. The "root" flag is missing in plugin.json.',
@@ -244,6 +249,11 @@ const de: Record<Key, string> = {
   "settings.autoCheckDesc":
     "Prüft im Hintergrund alle paar Stunden. Installiert wird nie von selbst.",
   "settings.notify": "Benachrichtigung bei Updates",
+  "settings.notifyThreshold": "Benachrichtigen ab",
+  "settings.notifyThresholdDesc":
+    "Meldet sich erst, wenn mindestens so viele Updates anstehen.",
+  "settings.notifyThresholdOne": "1 Paket",
+  "settings.notifyThresholdOption": "{n} Pakete",
 
   "selftest.rootOk": "Läuft als root - korrekt.",
   "selftest.rootBad": 'Läuft NICHT als root. In plugin.json fehlt das Flag "root".',

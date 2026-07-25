@@ -43,7 +43,8 @@ You can turn each part on or off:
 * Flatpaks
 * Firmware (off by default)
 * Automatic background checks
-* Notifications
+* Notifications, including how many packages have to be waiting before you
+  get one (1, 10, 25, 50 or 100)
 
 There is also a **Self-test** button. If something is not working, press it
 first. It tells you whether the plugin has the permissions it needs and which

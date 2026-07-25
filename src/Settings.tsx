@@ -1,13 +1,26 @@
-import { ButtonItem, PanelSection, PanelSectionRow, ToggleField } from "@decky/ui";
+import {
+  ButtonItem,
+  DropdownItem,
+  PanelSection,
+  PanelSectionRow,
+  ToggleField,
+} from "@decky/ui";
 import { useState } from "react";
 import { selfTest, setSettings, type SelfTest, type Settings as SettingsType } from "./api";
 import { t } from "./i18n";
 import { getStoreSettings, setStoreSettings, useSettings } from "./store";
 
+const NOTIFY_THRESHOLDS = [1, 10, 25, 50, 100];
+
 export function SettingsPanel() {
   const settings = useSettings();
   const [test, setTest] = useState<SelfTest | null>(null);
   const [testing, setTesting] = useState(false);
+  // A value written by an older version (or by hand) must not leave the
+  // dropdown blank.
+  const threshold = NOTIFY_THRESHOLDS.includes(settings.notify_threshold)
+    ? settings.notify_threshold
+    : NOTIFY_THRESHOLDS[0];
 
   const update = async (patch: Partial<SettingsType>) => {
     setStoreSettings(await setSettings(patch));
@@ -63,6 +76,23 @@ export function SettingsPanel() {
           onChange={(v) => update({ notify_on_updates: v })}
         />
       </PanelSectionRow>
+      {settings.notify_on_updates && (
+        <PanelSectionRow>
+          <DropdownItem
+            label={t("settings.notifyThreshold")}
+            description={t("settings.notifyThresholdDesc")}
+            rgOptions={NOTIFY_THRESHOLDS.map((n) => ({
+              data: n,
+              label:
+                n === 1
+                  ? t("settings.notifyThresholdOne")
+                  : t("settings.notifyThresholdOption", { n }),
+            }))}
+            selectedOption={threshold}
+            onChange={(option) => update({ notify_threshold: option.data as number })}
+          />
+        </PanelSectionRow>
+      )}
 
       <PanelSectionRow>
         <ButtonItem layout="below" disabled={testing} onClick={runSelfTest}>

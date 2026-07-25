@@ -100,6 +100,7 @@ let settings: Settings = {
   auto_check: true,
   check_interval_hours: 6,
   notify_on_updates: true,
+  notify_threshold: 1,
 };
 
 export function getStoreSettings(): Settings {

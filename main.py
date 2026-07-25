@@ -115,6 +115,8 @@ DEFAULT_SETTINGS = {
     "auto_check": True,
     "check_interval_hours": 6,
     "notify_on_updates": True,
+    # Only notify once at least this many packages are waiting.
+    "notify_threshold": 1,
 }
 
 # Packages whose upgrade means the machine should be restarted. Mirrors the
@@ -1224,7 +1226,8 @@ class Plugin:
                 if self.settings["auto_check"]:
                     await self.check_updates()
                     total = sum(self.state.counts.values())
-                    if total and self.settings["notify_on_updates"]:
+                    threshold = max(1, int(self.settings.get("notify_threshold", 1)))
+                    if total >= threshold and self.settings["notify_on_updates"]:
                         await decky.emit("cachyos_update_available", total)
             except asyncio.CancelledError:
                 raise
