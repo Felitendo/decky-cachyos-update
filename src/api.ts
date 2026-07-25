@@ -46,6 +46,7 @@ export interface Settings {
   enable_flatpak: boolean;
   enable_fwupd: boolean;
   auto_check: boolean;
+  auto_install: boolean;
   check_interval_hours: number;
   notify_on_updates: boolean;
   notify_threshold: number; // minimum number of updates before notifying

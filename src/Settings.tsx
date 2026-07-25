@@ -71,6 +71,14 @@ export function SettingsPanel() {
       </PanelSectionRow>
       <PanelSectionRow>
         <ToggleField
+          label={t("settings.autoInstall")}
+          description={t("settings.autoInstallDesc")}
+          checked={settings.auto_install}
+          onChange={(v) => update({ auto_install: v })}
+        />
+      </PanelSectionRow>
+      <PanelSectionRow>
+        <ToggleField
           label={t("settings.notify")}
           checked={settings.notify_on_updates}
           onChange={(v) => update({ notify_on_updates: v })}

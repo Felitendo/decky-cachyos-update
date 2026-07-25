@@ -32,8 +32,13 @@ There are two other buttons:
 * **Check for updates** looks for updates without installing anything.
 * **Restart now** only shows up when an update actually needs a restart.
 
-The plugin also checks for updates on its own every few hours and tells you
-when something is available. It never installs anything by itself.
+The plugin also checks for updates on its own every few hours. By default it
+just tells you, and only once at least 50 updates are waiting, so a couple of
+small packages will not nag you.
+
+If you turn on **Install updates automatically** in the settings, it installs
+them on its own instead. It never interrupts a game: when one is running it
+waits for the next check.
 
 ## Settings
 
@@ -43,8 +48,9 @@ You can turn each part on or off:
 * Flatpaks
 * Firmware (off by default)
 * Automatic background checks
-* Notifications, including how many packages have to be waiting before you
-  get one (1, 10, 25, 50 or 100)
+* Automatic installation (off by default)
+* Notifications, and how many updates have to be waiting before you get one
+  (1, 10, 25, 50 or 100)
 
 There is also a **Self-test** button. If something is not working, press it
 first. It tells you whether the plugin has the permissions it needs and which

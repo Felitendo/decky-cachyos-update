@@ -98,9 +98,10 @@ let settings: Settings = {
   enable_flatpak: true,
   enable_fwupd: false,
   auto_check: true,
+  auto_install: false,
   check_interval_hours: 6,
   notify_on_updates: true,
-  notify_threshold: 1,
+  notify_threshold: 50,
 };
 
 export function getStoreSettings(): Settings {

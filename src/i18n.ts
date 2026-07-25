@@ -118,6 +118,9 @@ const en = {
   "settings.autoCheckDesc":
     "Checks in the background every few hours. Nothing is ever installed on its own.",
   "settings.notify": "Notify when updates are available",
+  "settings.autoInstall": "Install updates automatically",
+  "settings.autoInstallDesc":
+    "Installs found updates without asking, but never while a game is running - it waits for the next check instead.",
   "settings.notifyThreshold": "Notify from",
   "settings.notifyThresholdDesc":
     "Only notifies once at least this many updates are waiting.",
@@ -136,6 +139,9 @@ const en = {
   "toast.availableTitle": "Updates available",
   "toast.availableBody": "{n} updates can be installed.",
   "toast.availableBodyOne": "1 update can be installed.",
+  "toast.autoTitle": "Installing updates",
+  "toast.autoBody": "{n} updates are being installed automatically.",
+  "toast.autoBodyOne": "1 update is being installed automatically.",
 };
 
 type Key = keyof typeof en;
@@ -249,6 +255,9 @@ const de: Record<Key, string> = {
   "settings.autoCheckDesc":
     "Prüft im Hintergrund alle paar Stunden. Installiert wird nie von selbst.",
   "settings.notify": "Benachrichtigung bei Updates",
+  "settings.autoInstall": "Updates automatisch installieren",
+  "settings.autoInstallDesc":
+    "Installiert gefundene Updates ohne Nachfrage, aber nie während ein Spiel läuft - dann wird bis zur nächsten Prüfung gewartet.",
   "settings.notifyThreshold": "Benachrichtigen ab",
   "settings.notifyThresholdDesc":
     "Meldet sich erst, wenn mindestens so viele Updates anstehen.",
@@ -267,6 +276,9 @@ const de: Record<Key, string> = {
   "toast.availableTitle": "Updates verfügbar",
   "toast.availableBody": "{n} Updates können installiert werden.",
   "toast.availableBodyOne": "1 Update kann installiert werden.",
+  "toast.autoTitle": "Updates werden installiert",
+  "toast.autoBody": "{n} Updates werden automatisch installiert.",
+  "toast.autoBodyOne": "1 Update wird automatisch installiert.",
 };
 
 const dictionaries: Record<string, Record<Key, string>> = { en, de };

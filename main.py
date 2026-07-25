@@ -113,10 +113,11 @@ DEFAULT_SETTINGS = {
     "enable_flatpak": True,
     "enable_fwupd": False,
     "auto_check": True,
+    "auto_install": False,
     "check_interval_hours": 6,
     "notify_on_updates": True,
     # Only notify once at least this many packages are waiting.
-    "notify_threshold": 1,
+    "notify_threshold": 50,
 }
 
 # Packages whose upgrade means the machine should be restarted. Mirrors the
@@ -1227,8 +1228,16 @@ class Plugin:
                     await self.check_updates()
                     total = sum(self.state.counts.values())
                     threshold = max(1, int(self.settings.get("notify_threshold", 1)))
-                    if total >= threshold and self.settings["notify_on_updates"]:
-                        await decky.emit("cachyos_update_available", total)
+                    # Announce unconditionally and let the frontend decide what
+                    # to do with it: only that side knows whether a game is
+                    # running, and automatic installs must not be tied to
+                    # whether the user wants toasts.
+                    if total:
+                        await decky.emit(
+                            "cachyos_update_available",
+                            total,
+                            total >= threshold and self.settings["notify_on_updates"],
+                        )
             except asyncio.CancelledError:
                 raise
             except Exception as exc:

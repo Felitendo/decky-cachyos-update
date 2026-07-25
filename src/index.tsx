@@ -4,6 +4,7 @@ import {
   PanelSection,
   PanelSectionRow,
   ProgressBar,
+  Router,
   showModal,
   staticClasses,
 } from "@decky/ui";
@@ -22,7 +23,15 @@ import {
   type Status,
 } from "./api";
 import { t, tid } from "./i18n";
-import { appendLog, clearLog, clearStatus, patchState, replaceState, useStore } from "./store";
+import {
+  appendLog,
+  clearLog,
+  clearStatus,
+  getStoreSettings,
+  patchState,
+  replaceState,
+  useStore,
+} from "./store";
 import { primeSettings, SettingsPanel } from "./Settings";
 import { UpdateLog } from "./UpdateLog";
 
@@ -388,8 +397,29 @@ export default definePlugin(() => {
     });
   };
 
-  const onAvailable = (total: number) => {
+  const onAvailable = async (total: number, notify: boolean) => {
     void getState().then(replaceState).catch(() => undefined);
+    const settings = getStoreSettings();
+
+    if (settings.auto_install) {
+      // Never interrupt a game. The check runs again in a few hours, so the
+      // update simply happens the next time the deck is idle.
+      if (Router.MainRunningApp) return;
+
+      const result = await startUpdate(false);
+      if (result.started) {
+        toaster.toast({
+          title: t("toast.autoTitle"),
+          body:
+            total === 1
+              ? t("toast.autoBodyOne")
+              : t("toast.autoBody", { n: total }),
+        });
+        return;
+      }
+    }
+
+    if (!notify) return;
     toaster.toast({
       title: t("toast.availableTitle"),
       body:
@@ -403,7 +433,7 @@ export default definePlugin(() => {
   addEventListener<[ProgressEvent]>("cachyos_update_progress", onProgress);
   addEventListener<[string]>("cachyos_update_state", onStatus);
   addEventListener<[boolean, string[], boolean]>("cachyos_update_finished", onFinished);
-  addEventListener<[number]>("cachyos_update_available", onAvailable);
+  addEventListener<[number, boolean]>("cachyos_update_available", onAvailable);
 
   // Prime the panel so the first open already shows real numbers.
   void getState().then(replaceState).catch(() => undefined);
