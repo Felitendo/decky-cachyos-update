@@ -73,8 +73,12 @@ const en = {
   "reason.not_root":
     'The backend is not running as root. The "root" flag is missing in plugin.json.',
   "reason.pacman_busy":
-    "Another package manager is running (pacman lock held). Please wait a moment.",
+    "{holder} is using the package database right now. Please wait until it is done.",
+  // Substituted for {holder} when the process name could not be determined.
+  "reason.someProcess": "Another package manager",
 
+  "hint.db_locked":
+    "The package database is locked by another package manager. Close Pamac or the terminal that is updating and try again.",
   "hint.pkg_conflict":
     "Package conflicts need to be resolved manually. Please run 'sudo pacman -Syu' in desktop mode and confirm the conflicts.",
   "hint.file_conflict":
@@ -131,7 +135,9 @@ const en = {
   "selftest.rootBad": 'NOT running as root. The "root" flag is missing in plugin.json.',
   "selftest.user": "User: {user}",
   "selftest.kernel": "Kernel: {kernel}",
-  "selftest.pacmanBusy": "pacman is currently locked.",
+  "selftest.lockHeld": "Package database in use by {holder} (PID {pid}).",
+  "selftest.lockStale":
+    "Leftover pacman lock ({age} s old). It is removed automatically at the next check.",
 
   "toast.doneTitle": "Update complete",
   "toast.failedTitle": "Update failed",
@@ -210,8 +216,11 @@ const de: Record<Key, string> = {
   "reason.not_root":
     'Das Backend läuft nicht als root. In plugin.json fehlt das Flag "root".',
   "reason.pacman_busy":
-    "Ein anderer Paketmanager läuft gerade (pacman-Sperre aktiv). Bitte kurz warten.",
+    "{holder} benutzt gerade die Paketdatenbank. Bitte warten, bis der Vorgang fertig ist.",
+  "reason.someProcess": "Ein anderer Paketmanager",
 
+  "hint.db_locked":
+    "Die Paketdatenbank ist von einem anderen Paketmanager gesperrt. Bitte Pamac oder das aktualisierende Terminal schließen und es erneut versuchen.",
   "hint.pkg_conflict":
     "Paketkonflikte müssen manuell aufgelöst werden. Bitte im Desktop-Modus 'sudo pacman -Syu' ausführen und die Konflikte bestätigen.",
   "hint.file_conflict":
@@ -268,7 +277,9 @@ const de: Record<Key, string> = {
   "selftest.rootBad": 'Läuft NICHT als root. In plugin.json fehlt das Flag "root".',
   "selftest.user": "Benutzer: {user}",
   "selftest.kernel": "Kernel: {kernel}",
-  "selftest.pacmanBusy": "pacman ist gerade gesperrt.",
+  "selftest.lockHeld": "Paketdatenbank wird von {holder} benutzt (PID {pid}).",
+  "selftest.lockStale":
+    "Übrig gebliebene pacman-Sperre ({age} s alt). Sie wird bei der nächsten Prüfung automatisch entfernt.",
 
   "toast.doneTitle": "Update abgeschlossen",
   "toast.failedTitle": "Update fehlgeschlagen",
@@ -321,10 +332,14 @@ export function t(key: Key, params?: Record<string, string | number>): string {
 }
 
 /** Translate an id coming from the backend, e.g. "pacman" -> "phase.pacman". */
-export function tid(prefix: string, id: string): string {
+export function tid(
+  prefix: string,
+  id: string,
+  params?: Record<string, string | number>,
+): string {
   if (!id) return "";
   const key = `${prefix}.${id}` as Key;
-  return key in en ? t(key) : id;
+  return key in en ? t(key, params) : id;
 }
 
 export function currentLanguage(): string {

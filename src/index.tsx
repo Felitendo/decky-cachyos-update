@@ -170,7 +170,7 @@ function Content() {
   const state = useStore();
   const [showLog, setShowLog] = useState(false);
   const [showDetails, setShowDetails] = useState(false);
-  const [reasonId, setReasonId] = useState("");
+  const [reason, setReason] = useState({ id: "", holder: "" });
 
   const running = state.status === "checking" || state.status === "updating";
   useTicker(state.status === "updating");
@@ -189,7 +189,7 @@ function Content() {
   }, []);
 
   const onCheck = async () => {
-    setReasonId("");
+    setReason({ id: "", holder: "" });
     patchState({ status: "checking" });
     try {
       replaceState(await checkUpdates());
@@ -199,12 +199,12 @@ function Content() {
   };
 
   const onUpdate = async () => {
-    setReasonId("");
+    setReason({ id: "", holder: "" });
     clearLog();
     clearStatus();
     const result = await startUpdate(false);
     if (!result.started) {
-      setReasonId(result.reason_id);
+      setReason({ id: result.reason_id, holder: result.holder });
     }
     // The log stays collapsed on purpose: opening it pushes everything else
     // off screen, and most runs need no attention at all.
@@ -264,9 +264,13 @@ function Content() {
           </PanelSectionRow>
         )}
 
-        {reasonId && (
+        {reason.id && (
           <PanelSectionRow>
-            <Note color={WARN}>{tid("reason", reasonId)}</Note>
+            <Note color={WARN}>
+              {tid("reason", reason.id, {
+                holder: reason.holder || t("reason.someProcess"),
+              })}
+            </Note>
           </PanelSectionRow>
         )}
 

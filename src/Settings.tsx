@@ -120,8 +120,18 @@ export function SettingsPanel() {
             <div style={{ opacity: 0.8 }}>
               {t("selftest.kernel", { kernel: test.kernel })}
             </div>
-            {test.pacman_busy && (
-              <div style={{ color: "#ffd280" }}>{t("selftest.pacmanBusy")}</div>
+            {test.pacman_lock?.held && (
+              <div style={{ color: "#ffd280" }}>
+                {t("selftest.lockHeld", {
+                  holder: test.pacman_lock.holder || "?",
+                  pid: test.pacman_lock.holder_pid || "?",
+                })}
+              </div>
+            )}
+            {test.pacman_lock?.stale && (
+              <div style={{ color: "#ffd280" }}>
+                {t("selftest.lockStale", { age: test.pacman_lock.age })}
+              </div>
             )}
             <div style={{ marginTop: "4px" }}>
               {Object.entries(test.tools).map(([name, info]) => (

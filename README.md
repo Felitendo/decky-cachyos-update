@@ -70,6 +70,13 @@ file you changed, pacman writes it alongside yours and the plugin ignores it,
 exactly like `cachy-update` does. Some of those files are managed by CachyOS
 itself, and replacing them can break your system.
 
+**A stuck package database fixes itself.** If pacman or Pamac is killed halfway
+through, it leaves a lock file behind and every later update dies with "unable
+to lock database". The plugin checks whether any process still has that file
+open, and if none does it simply removes it - on start, before every check and
+before and after every update. If a package manager really is running, it says
+so and waits instead.
+
 **Firmware is off by default.** A failed firmware update cannot be undone, so
 you have to switch it on yourself if you want it.
 
@@ -98,6 +105,7 @@ The backend runs without Decky, so you can test it on a normal machine:
 python3 main.py --selftest          # what is installed, are we root
 python3 main.py --check             # real check, changes nothing
 python3 main.py --update --dry-run  # prints the commands, runs nothing
+sudo python3 main.py --fix-lock     # report on the pacman lock, clear an orphan
 ```
 
 To add a language, add one dictionary to [`src/i18n.ts`](src/i18n.ts). The

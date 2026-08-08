@@ -15,6 +15,7 @@ Decky installed:
     python3 main.py --selftest
     python3 main.py --check
     python3 main.py --update --dry-run
+    sudo python3 main.py --fix-lock
 """
 
 import asyncio
@@ -93,6 +94,12 @@ else:
 LOG_MAX_LINES = 500
 PACMAN_LOCK = "/var/lib/pacman/db.lck"
 
+# How long a lock nobody has open has to have been lying around before it
+# counts as abandoned. libalpm creates the file and its descriptor in the same
+# atomic open(), so there is no window in which a live lock looks unowned -
+# this is pure insurance against a /proc scan that raced with a process start.
+LOCK_STALE_AFTER = 5.0
+
 # sudo skips files in sudoers.d whose name contains a "." or ends in "~",
 # so the name deliberately has neither.
 SUDOERS_FILE = "/etc/sudoers.d/50-decky-cachyos-update"
@@ -139,6 +146,10 @@ REBOOT_TRIGGER_PATTERNS = [
 # Output markers that mean "this needs a human", mapped to a hint id that the
 # frontend turns into localized advice. Order matters: first match wins.
 ERROR_HINTS = [
+    # Only reachable while another package manager genuinely holds the lock -
+    # an abandoned one is removed before the run even starts.
+    ("unable to lock database", "db_locked"),
+    ("failed to init transaction", "db_locked"),
     ("unresolvable package conflicts", "pkg_conflict"),
     ("conflicting files", "file_conflict"),
     ("exists in filesystem", "file_conflict"),
@@ -364,8 +375,132 @@ def _user_cmd(cmd, extra_env=None):
     return ["runuser", "-u", user, "--", "env", "-i"] + env_args + cmd, _base_env()
 
 
-def _pacman_busy():
-    return os.path.exists(PACMAN_LOCK)
+# --------------------------------------------------------------------------
+# pacman database lock
+#
+# An interrupted pacman - a killed pamac, a suspend, a reboot in the middle of
+# a transaction - leaves /var/lib/pacman/db.lck behind. Nothing in the system
+# ever cleans that up, so every later run dies with "unable to lock database"
+# until someone deletes the file by hand. Since the plugin is what people use
+# to update, it has to recognise and clear that itself.
+# --------------------------------------------------------------------------
+
+
+def _proc_name(pid):
+    try:
+        with open(f"/proc/{pid}/comm", encoding="utf-8", errors="replace") as fh:
+            return fh.read().strip()
+    except OSError:
+        return ""
+
+
+def _lock_holder():
+    """(pid, name) of the process that has the pacman lock open, or None.
+
+    libalpm creates db.lck with O_CREAT|O_EXCL and keeps the descriptor open
+    until the transaction ends, so an open descriptor pointing at the file is
+    proof that the lock is live - and the absence of one is proof that it is
+    not, no matter how the owner died. That is far more reliable than looking
+    for process names: pamac's daemon and yay's helpers come and go, and the
+    file carries no pid.
+
+    Reading other processes' descriptors requires root, which the backend has.
+    """
+    targets = {PACMAN_LOCK, os.path.realpath(PACMAN_LOCK)}
+    # A holder that still has the deleted file open keeps blocking libalpm's
+    # own O_EXCL create, so it counts just the same.
+    targets |= {f"{path} (deleted)" for path in tuple(targets)}
+
+    try:
+        entries = list(os.scandir("/proc"))
+    except OSError:
+        return None
+
+    for entry in entries:
+        if not entry.name.isdigit():
+            continue
+        fd_dir = f"/proc/{entry.name}/fd"
+        try:
+            fds = os.listdir(fd_dir)
+        except OSError:
+            # Exited between the two calls, or belongs to another user.
+            continue
+        for fd in fds:
+            try:
+                if os.readlink(f"{fd_dir}/{fd}") in targets:
+                    return int(entry.name), _proc_name(entry.name) or "?"
+            except OSError:
+                continue
+    return None
+
+
+def _lock_status():
+    """What the pacman database lock is doing right now.
+
+    "held" means a live package manager owns it and we have to wait; "stale"
+    means the file is an orphan and removing it is safe.
+    """
+    empty = {
+        "present": False,
+        "held": False,
+        "stale": False,
+        "holder": "",
+        "holder_pid": 0,
+        "age": 0.0,
+        "inode": 0,
+    }
+    try:
+        info = os.stat(PACMAN_LOCK)
+    except OSError:
+        return empty
+
+    status = dict(
+        empty,
+        present=True,
+        # The file stays empty for its whole lifetime, so its mtime is the
+        # moment the transaction started.
+        age=max(0.0, time.time() - info.st_mtime),
+        inode=info.st_ino,
+    )
+
+    holder = _lock_holder()
+    if holder:
+        return dict(status, held=True, holder_pid=holder[0], holder=holder[1])
+
+    # Without root the scan only sees our own descriptors, so "nobody has it
+    # open" would be a guess - and a wrong guess would delete a live lock.
+    # Assume it is held instead; in production the backend runs as root.
+    if not _is_root():
+        return dict(status, held=True)
+
+    return dict(status, stale=status["age"] >= LOCK_STALE_AFTER)
+
+
+def _clear_stale_lock():
+    """Remove an abandoned pacman lock. Returns its status dict, or None.
+
+    Deleting the file is exactly what pacman's own error message asks for, and
+    it is safe here because no process has the database open - there is no
+    transaction left that could be corrupted.
+    """
+    status = _lock_status()
+    if not status["stale"]:
+        return None
+    try:
+        # Anything that grabbed the lock in the meantime had to reuse this
+        # very file (O_EXCL fails while it exists), so an inode that no longer
+        # matches means someone else already cleaned up and started fresh.
+        if os.stat(PACMAN_LOCK).st_ino != status["inode"]:
+            return None
+        os.remove(PACMAN_LOCK)
+    except OSError as exc:
+        decky.logger.error("Could not remove stale pacman lock: %s", exc)
+        return None
+    decky.logger.warning(
+        "Removed stale pacman lock %s (%d s old, no process had it open)",
+        PACMAN_LOCK, int(status["age"]),
+    )
+    return status
 
 
 _installed_cache = None
@@ -421,12 +556,20 @@ class Plugin:
             )
         # A crash or forced restart could have left the rule behind.
         self._revoke_pacman()
+        # Same for the database lock: if the machine went down mid-transaction,
+        # this is the first moment anything can notice and repair it. No
+        # update log is open yet and no frontend is listening, so this goes to
+        # the plugin log only.
+        _clear_stale_lock()
         self._auto_task = asyncio.create_task(self._auto_check_loop())
 
     async def _unload(self):
         if self._auto_task:
             self._auto_task.cancel()
         self._revoke_pacman()
+        # Harmless while an update is still running - a lock its pacman holds
+        # open is not stale, so it stays.
+        _clear_stale_lock()
         self._save_state()
         decky.logger.info("CachyOS Update backend stopped")
 
@@ -612,6 +755,26 @@ class Plugin:
                 SUDOERS_FILE, exc,
             )
 
+    # -- pacman lock -------------------------------------------------------
+
+    async def _heal_pacman_lock(self):
+        """Clear a leftover lock, so an interrupted run cannot block later ones.
+
+        Called on plugin start, before and after every update and before every
+        check: whichever of those happens first repairs the system, without
+        the user ever having to know that /var/lib/pacman/db.lck exists.
+        """
+        if self._dry_run:
+            return False
+        cleared = _clear_stale_lock()
+        if not cleared:
+            return False
+        await self._log(
+            f"!! Removed stale pacman lock {PACMAN_LOCK} "
+            f"({int(cleared['age'])} s old, no process had it open)"
+        )
+        return True
+
     # -- process runner ----------------------------------------------------
 
     async def _run(
@@ -793,6 +956,10 @@ class Plugin:
             return self.state.to_dict()
         async with self.lock:
             await self._set_status("checking")
+            # The periodic check is what runs most often, so letting it repair
+            # the lock means an abandoned one is usually gone long before the
+            # user ever presses "Update".
+            await self._heal_pacman_lock()
             warnings = []
             try:
                 results = {}
@@ -978,13 +1145,22 @@ class Plugin:
 
     async def start_update(self, dry_run=False):
         if self.lock.locked():
-            return {"started": False, "reason_id": "already_running"}
+            return {"started": False, "reason_id": "already_running", "holder": ""}
         if not _is_root() and not dry_run:
-            return {"started": False, "reason_id": "not_root"}
-        if _pacman_busy() and not dry_run:
-            return {"started": False, "reason_id": "pacman_busy"}
+            return {"started": False, "reason_id": "not_root", "holder": ""}
+        if not dry_run:
+            # An abandoned lock must never be a reason to refuse: clear it
+            # first, and only report "busy" for one that is genuinely held.
+            _clear_stale_lock()
+            status = _lock_status()
+            if status["held"]:
+                return {
+                    "started": False,
+                    "reason_id": "pacman_busy",
+                    "holder": status["holder"],
+                }
         asyncio.create_task(self._do_update(dry_run))
-        return {"started": True, "reason_id": ""}
+        return {"started": True, "reason_id": "", "holder": ""}
 
     async def _do_update(self, dry_run=False):
         async with self.lock:
@@ -1001,6 +1177,7 @@ class Plugin:
             self.state.update_started = time.time()
             self._open_update_log()
             await self._set_status("updating")
+            await self._heal_pacman_lock()
 
             phases = self._enabled_phases()
             total_weight = sum(PHASE_WEIGHTS[p] for p in phases)
@@ -1052,6 +1229,10 @@ class Plugin:
                 self.state.status = "error"
                 self.state.error_text = str(exc)
             finally:
+                # A pacman killed mid-run - suspend, OOM, a forced reload of
+                # the plugin - leaves its lock behind. Clean up after
+                # ourselves instead of handing the problem to the next run.
+                await self._heal_pacman_lock()
                 self._dry_run = False
                 self._close_update_log()
                 await decky.emit("cachyos_update_state", self.state.status)
@@ -1202,6 +1383,7 @@ class Plugin:
                     pass
             tools[name] = entry
 
+        lock = _lock_status()
         return {
             "root": _is_root(),
             "uid": os.geteuid(),
@@ -1212,7 +1394,14 @@ class Plugin:
             "kernel_vmlinuz_present": Path(
                 f"/usr/lib/modules/{os.uname().release}/vmlinuz"
             ).is_file(),
-            "pacman_busy": _pacman_busy(),
+            "pacman_lock": {
+                "present": lock["present"],
+                "held": lock["held"],
+                "stale": lock["stale"],
+                "holder": lock["holder"],
+                "holder_pid": lock["holder_pid"],
+                "age": int(lock["age"]),
+            },
             "tools": tools,
             "settings": self.settings,
         }
@@ -1261,6 +1450,22 @@ async def _cli():
         print(json.dumps(result, indent=2, ensure_ascii=False))
         if not result["root"]:
             print("\nNote: not running as root - expected during development.")
+        return
+
+    if "--fix-lock" in args:
+        status = _lock_status()
+        if not status["present"]:
+            print(f"{PACMAN_LOCK}: not present - pacman is free to run.")
+        elif status["held"]:
+            print(
+                f"{PACMAN_LOCK}: held by {status['holder'] or 'another process'}"
+                f" (pid {status['holder_pid'] or '?'}), {int(status['age'])} s old."
+                "\nNothing to do - wait for it to finish."
+            )
+        elif _clear_stale_lock():
+            print(f"{PACMAN_LOCK}: stale lock removed.")
+        else:
+            print(f"{PACMAN_LOCK}: present, {int(status['age'])} s old - left alone.")
         return
 
     if "--check" in args:

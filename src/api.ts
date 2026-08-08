@@ -58,6 +58,16 @@ export interface ToolInfo {
   version: string;
 }
 
+/** State of /var/lib/pacman/db.lck. `stale` means it is an orphan. */
+export interface LockStatus {
+  present: boolean;
+  held: boolean;
+  stale: boolean;
+  holder: string; // process name, "" if unknown
+  holder_pid: number;
+  age: number; // seconds
+}
+
 export interface SelfTest {
   root: boolean;
   uid: number;
@@ -66,7 +76,7 @@ export interface SelfTest {
   decky_user_home: string;
   kernel: string;
   kernel_vmlinuz_present: boolean;
-  pacman_busy: boolean;
+  pacman_lock: LockStatus;
   tools: Record<string, ToolInfo>;
   settings: Settings;
 }
@@ -75,7 +85,7 @@ export const getState = callable<[], BackendState>("get_state");
 export const checkUpdates = callable<[], BackendState>("check_updates");
 export const startUpdate = callable<
   [dryRun: boolean],
-  { started: boolean; reason_id: string }
+  { started: boolean; reason_id: string; holder: string }
 >("start_update");
 export const getSettings = callable<[], Settings>("get_settings");
 export const setSettings = callable<[settings: Partial<Settings>], Settings>("set_settings");
