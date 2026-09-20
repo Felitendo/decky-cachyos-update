@@ -154,6 +154,9 @@ ERROR_HINTS = [
     ("conflicting files", "file_conflict"),
     ("exists in filesystem", "file_conflict"),
     ("unresolvable dependencies", "unresolvable_deps"),
+    # Only reached when holding the package back did not help either.
+    ("breaks dependency", "dep_break"),
+    ("could not satisfy dependencies", "dep_break"),
     ("invalid or corrupted package", "corrupt_package"),
     ("signature from", "bad_signature"),
     ("failed to synchronize", "sync_failed"),
@@ -178,6 +181,20 @@ ERROR_HINTS = [
 
 PROGRESS_RE = re.compile(r"\(\s*(\d+)\s*/\s*(\d+)\s*\)")
 UPGRADING_RE = re.compile(r"upgrading\s+([a-zA-Z0-9@._+-]+)")
+
+# ":: installing libpcap (1.11.0-1.1) breaks dependency 'libpcap=1.10.6'
+# required by lib32-libpcap" - a package was rebuilt in one repository before
+# the packages depending on it were rebuilt in another. LC_ALL is pinned to
+# C.UTF-8, so this wording is the only one that can appear.
+DEP_BREAK_RE = re.compile(
+    r"^::\s+(?:installing|upgrading)\s+(\S+?)(?:\s+\([^)]*\))?\s+"
+    r"breaks dependency\s+'[^']+'\s+required by\s+\S+"
+)
+
+# How many packages may be held back before the situation stops looking like
+# a repository that is a few hours behind and starts looking like a broken
+# system the user needs to know about.
+MAX_HELD_PACKAGES = 10
 
 # yay prints its early warnings through fallbackLog, before --color never is
 # parsed, so colour codes show up even with colour disabled.
@@ -215,6 +232,7 @@ class State:
         self.reboot_required = False
         self.failed_phases = []
         self.failed_packages = []
+        self.held_packages = []
         self.hint_id = ""
         self.warnings = []
         self.error_text = ""  # only for unexpected exceptions
@@ -236,6 +254,7 @@ class State:
             "reboot_required": self.reboot_required,
             "failed_phases": self.failed_phases,
             "failed_packages": self.failed_packages,
+            "held_packages": self.held_packages,
             "hint_id": self.hint_id,
             "warnings": self.warnings,
             "error_text": self.error_text,
@@ -527,6 +546,23 @@ def _installed(pkg):
 def _invalidate_installed_cache():
     global _installed_cache
     _installed_cache = None
+
+
+def _held_back_packages(lines):
+    """Packages pacman refuses to upgrade because a dependant lags behind.
+
+    CachyOS rebuilds its own packages ahead of Arch, and Arch's multilib
+    repository trails the others, so a freshly bumped library regularly
+    leaves its lib32- counterpart pinned to the previous version for a few
+    hours. pacman then aborts the entire transaction, which would mean no
+    updates at all until someone else fixes the repository.
+    """
+    held = []
+    for line in lines:
+        match = DEP_BREAK_RE.match(line.strip())
+        if match and match.group(1) not in held:
+            held.append(match.group(1))
+    return held
 
 
 # --------------------------------------------------------------------------
@@ -1065,14 +1101,34 @@ class Plugin:
         return True, lines
 
     async def _phase_pacman(self, **kw):
-        rc, lines = await self._run(
-            [
-                "pacman", "-Su", "--noconfirm",
-                "--noprogressbar", "--color", "never",
-            ],
-            **kw,
-        )
-        return rc == 0, lines
+        cmd = [
+            "pacman", "-Su", "--noconfirm",
+            "--noprogressbar", "--color", "never",
+        ]
+        rc, output = await self._run(cmd, **kw)
+
+        # One package the repositories cannot agree on must not cost the user
+        # all the other updates. Waiting for the missing rebuild is the only
+        # real cure, so hold that package back and upgrade everything else in
+        # the meantime. Each retry is a complete transaction that pacman
+        # validates on its own, so the system stays consistent - it is simply
+        # one package behind until the rebuild lands.
+        held = []
+        while rc != 0 and len(held) < MAX_HELD_PACKAGES:
+            new = [p for p in _held_back_packages(output) if p not in held]
+            if not new:
+                break
+            held += new
+            await self._log(
+                f"!! Holding back {', '.join(new)} - a package depending on it "
+                "has not been rebuilt yet. Upgrading everything else."
+            )
+            rc, retry = await self._run(cmd + ["--ignore", ",".join(held)], **kw)
+            output = output + retry
+
+        if rc == 0:
+            self.state.held_packages = held
+        return rc == 0, output
 
     async def _phase_aur(self, **kw):
         args = [
@@ -1082,6 +1138,10 @@ class Plugin:
             # can answer if the sudoers rule did not take effect.
             "--sudoflags", "-n",
         ]
+        # yay resolves the repository upgrade again and would walk straight
+        # into the dependency break the pacman phase just worked around.
+        if self.state.held_packages:
+            args += ["--ignore", ",".join(self.state.held_packages)]
         cmd, env = _user_cmd(args)
 
         user, _ = _desktop_user()
@@ -1171,6 +1231,7 @@ class Plugin:
             self.state.warnings = []
             self.state.failed_phases = []
             self.state.failed_packages = []
+            self.state.held_packages = []
             self.state.progress = 0.0
             self.state.download_mib = 0.0
             self.state.downloading = False
@@ -1492,6 +1553,8 @@ async def _cli():
             plugin.settings["enable_fwupd"] = True
         await plugin._do_update(dry_run=dry)
         print(f"\nStatus: {plugin.state.status}")
+        if plugin.state.held_packages:
+            print(f"Held back: {', '.join(plugin.state.held_packages)}")
         if plugin.state.failed_phases:
             print(f"Failed phases: {', '.join(plugin.state.failed_phases)}")
         if plugin.state.error_text:

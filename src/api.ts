@@ -36,6 +36,7 @@ export interface BackendState {
   reboot_required: boolean;
   failed_phases: string[]; // phase ids
   failed_packages: string[]; // packages yay could not build
+  held_packages: string[]; // packages skipped until the repositories agree
   hint_id: string;
   warnings: string[]; // warning ids
   error_text: string; // raw text, unexpected exceptions only

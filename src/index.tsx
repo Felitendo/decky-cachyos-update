@@ -284,6 +284,16 @@ function Content() {
           </PanelSectionRow>
         )}
 
+        {state.held_packages.length > 0 && (
+          <PanelSectionRow>
+            <Note color={WARN}>
+              {t("status.heldPackages", {
+                packages: state.held_packages.join(", "),
+              })}
+            </Note>
+          </PanelSectionRow>
+        )}
+
         {state.hint_id && (
           <PanelSectionRow>
             <Note color={WARN}>{tid("hint", state.hint_id)}</Note>

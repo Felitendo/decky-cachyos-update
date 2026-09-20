@@ -77,6 +77,13 @@ open, and if none does it simply removes it - on start, before every check and
 before and after every update. If a package manager really is running, it says
 so and waits instead.
 
+**One out-of-sync package does not stop the rest.** CachyOS rebuilds packages
+ahead of Arch, and Arch's multilib repository trails behind, so now and then a
+library is newer than the 32-bit package depending on it and pacman refuses the
+entire transaction over it. The plugin holds that one package back, installs
+everything else, and tells you which package is waiting. It catches up on its
+own once the missing rebuild lands.
+
 **Firmware is off by default.** A failed firmware update cannot be undone, so
 you have to switch it on yourself if you want it.
 
