@@ -20,7 +20,7 @@ const en = {
   "status.failedPhases": "Failed: {phases}",
   "status.failedPackages": "Could not be installed: {packages}",
   "status.heldPackages":
-    "Held back until the repositories are in sync again: {packages}. Everything else was updated.",
+    "Held back for now: {packages}. These can only be upgraded together, and one of them is not ready yet - everything else was updated.",
   "status.logHint": "Full output: {path}",
 
   "phase.keyring": "Updating keyring",
@@ -88,7 +88,7 @@ const en = {
   "hint.unresolvable_deps":
     "Dependencies could not be resolved. Usually waiting a few hours for the mirrors to catch up is enough.",
   "hint.dep_break":
-    "A package was rebuilt before the packages that depend on it, and holding it back did not help either. The repositories usually catch up within a few hours - please try again later.",
+    "Two packages that can only be upgraded together are out of step, and holding them back did not help either. This usually clears up within a few hours - the full output names them if you want to upgrade the pair yourself in desktop mode.",
   "hint.corrupt_package":
     "A package was downloaded corrupted. Retrying usually fixes this.",
   "hint.bad_signature":
@@ -167,7 +167,7 @@ const de: Record<Key, string> = {
   "status.failedPhases": "Fehlgeschlagen: {phases}",
   "status.failedPackages": "Konnte nicht installiert werden: {packages}",
   "status.heldPackages":
-    "Zurückgehalten, bis die Paketquellen wieder synchron sind: {packages}. Alles andere wurde aktualisiert.",
+    "Vorerst zurückgehalten: {packages}. Diese Pakete lassen sich nur gemeinsam aktualisieren, und eines davon ist noch nicht so weit - alles andere wurde aktualisiert.",
   "status.logHint": "Vollständige Ausgabe: {path}",
 
   "phase.keyring": "Schlüsselbund wird aktualisiert",
@@ -234,7 +234,7 @@ const de: Record<Key, string> = {
   "hint.unresolvable_deps":
     "Abhängigkeiten lassen sich nicht auflösen. Meist hilft es, ein paar Stunden zu warten, bis die Spiegelserver synchron sind.",
   "hint.dep_break":
-    "Ein Paket wurde neu gebaut, bevor die davon abhängigen Pakete nachgezogen wurden, und auch das Zurückhalten hat nicht geholfen. Die Paketquellen sind meist nach ein paar Stunden wieder synchron - bitte später noch einmal versuchen.",
+    "Zwei Pakete, die sich nur gemeinsam aktualisieren lassen, passen gerade nicht zusammen, und auch das Zurückhalten hat nicht geholfen. Das erledigt sich meist innerhalb weniger Stunden - in der vollständigen Ausgabe stehen die Namen, falls du das Paar im Desktop-Modus selbst aktualisieren willst.",
   "hint.corrupt_package":
     "Ein Paket wurde beschädigt heruntergeladen. Ein erneuter Versuch behebt das meistens.",
   "hint.bad_signature":

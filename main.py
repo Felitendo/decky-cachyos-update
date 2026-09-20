@@ -183,12 +183,12 @@ PROGRESS_RE = re.compile(r"\(\s*(\d+)\s*/\s*(\d+)\s*\)")
 UPGRADING_RE = re.compile(r"upgrading\s+([a-zA-Z0-9@._+-]+)")
 
 # ":: installing libpcap (1.11.0-1.1) breaks dependency 'libpcap=1.10.6'
-# required by lib32-libpcap" - a package was rebuilt in one repository before
-# the packages depending on it were rebuilt in another. LC_ALL is pinned to
-# C.UTF-8, so this wording is the only one that can appear.
+# required by lib32-libpcap" - the two packages have to move together and one
+# of them is not ready. LC_ALL is pinned to C.UTF-8, so this wording is the
+# only one that can appear.
 DEP_BREAK_RE = re.compile(
     r"^::\s+(?:installing|upgrading)\s+(\S+?)(?:\s+\([^)]*\))?\s+"
-    r"breaks dependency\s+'[^']+'\s+required by\s+\S+"
+    r"breaks dependency\s+'[^']+'\s+required by\s+(\S+)"
 )
 
 # How many packages may be held back before the situation stops looking like
@@ -548,21 +548,23 @@ def _invalidate_installed_cache():
     _installed_cache = None
 
 
-def _held_back_packages(lines):
-    """Packages pacman refuses to upgrade because a dependant lags behind.
+def _dependency_breaks(lines):
+    """(blocker, dependant) pairs pacman aborted the transaction over.
 
-    CachyOS rebuilds its own packages ahead of Arch, and Arch's multilib
-    repository trails the others, so a freshly bumped library regularly
-    leaves its lib32- counterpart pinned to the previous version for a few
-    hours. pacman then aborts the entire transaction, which would mean no
-    updates at all until someone else fixes the repository.
+    A package with a strict "=" dependency on a library has to be upgraded in
+    the same transaction as that library. When it cannot be - because Arch's
+    multilib repository trails the others, or because the dependant comes from
+    the AUR and has to be rebuilt first - pacman refuses the whole transaction,
+    which would mean no updates at all until someone sorts the pair out by hand.
     """
-    held = []
+    pairs = []
     for line in lines:
         match = DEP_BREAK_RE.match(line.strip())
-        if match and match.group(1) not in held:
-            held.append(match.group(1))
-    return held
+        if match:
+            pair = (match.group(1), match.group(2))
+            if pair not in pairs:
+                pairs.append(pair)
+    return pairs
 
 
 # --------------------------------------------------------------------------
@@ -1113,33 +1115,58 @@ class Plugin:
         # the meantime. Each retry is a complete transaction that pacman
         # validates on its own, so the system stays consistent - it is simply
         # one package behind until the rebuild lands.
-        held = []
-        while rc != 0 and len(held) < MAX_HELD_PACKAGES:
-            new = [p for p in _held_back_packages(output) if p not in held]
-            if not new:
+        # Only the blocker is kept out of pacman's way; its dependant has no
+        # repository upgrade to skip. Both go into state.held_packages, which
+        # is what the user is shown and what yay is told to leave alone.
+        blockers = []
+        history = list(output)
+        while rc != 0 and len(blockers) < MAX_HELD_PACKAGES:
+            fresh = [
+                (b, d) for b, d in _dependency_breaks(history) if b not in blockers
+            ]
+            if not fresh:
                 break
-            held += new
+            for blocker, dependant in fresh:
+                if blocker not in blockers:
+                    blockers.append(blocker)
+                for name in (blocker, dependant):
+                    if name not in self.state.held_packages:
+                        self.state.held_packages.append(name)
             await self._log(
-                f"!! Holding back {', '.join(new)} - a package depending on it "
-                "has not been rebuilt yet. Upgrading everything else."
+                "!! Holding back "
+                + ", ".join(f"{b} (pinned by {d})" for b, d in fresh)
+                + " - upgrading everything else."
             )
-            rc, retry = await self._run(cmd + ["--ignore", ",".join(held)], **kw)
-            output = output + retry
+            rc, output = await self._run(
+                cmd + ["--ignore", ",".join(blockers)], **kw
+            )
+            history = history + output
 
-        if rc == 0:
-            self.state.held_packages = held
-        return rc == 0, output
+        if rc != 0:
+            self.state.held_packages = []
+            return False, history
+        # The attempts that were abandoned installed nothing, and their error
+        # lines would otherwise make a later phase look like it broke over a
+        # dependency. Only what actually ran is worth reporting.
+        return True, output
 
     async def _phase_aur(self, **kw):
         args = [
-            _which("yay") or "yay", "-Syu", "--noconfirm", "--removemake",
+            # --aur, not a second full -Syu: the repository upgrade already
+            # happened in the pacman phase. Repeating it here re-resolves the
+            # dependency break that phase worked around, and this time the
+            # blocker arrives as an explicit target - for which pacman only
+            # asks "in IgnorePkg, install anyway?" and --noconfirm says yes.
+            _which("yay") or "yay", "-Syu", "--aur",
+            "--noconfirm", "--removemake",
             "--noprogressbar", "--color", "never",
             # Fail fast instead of blocking on a password prompt that no one
             # can answer if the sudoers rule did not take effect.
             "--sudoflags", "-n",
         ]
-        # yay resolves the repository upgrade again and would walk straight
-        # into the dependency break the pacman phase just worked around.
+        # A held-back pair stays held back here too. Without this yay would
+        # rebuild the dependant, pull the blocker in as its dependency, and
+        # hit the very conflict the pacman phase stepped around.
         if self.state.held_packages:
             args += ["--ignore", ",".join(self.state.held_packages)]
         cmd, env = _user_cmd(args)
@@ -1244,6 +1271,10 @@ class Plugin:
             total_weight = sum(PHASE_WEIGHTS[p] for p in phases)
             done_weight = 0
             all_output = []
+            # Kept apart from all_output: a phase that recovered on its own
+            # still printed the error it recovered from, and that error must
+            # not end up explaining a later phase's failure.
+            failed_output = []
 
             handlers = {
                 "keyring": self._phase_keyring,
@@ -1266,6 +1297,7 @@ class Plugin:
                     done_weight += weight
                     if not ok:
                         self.state.failed_phases.append(phase)
+                        failed_output += lines
                         await self._log(f"!! Phase failed: {phase}")
                         # The repo upgrade is the foundation - if it breaks,
                         # building AUR packages on top of it is a bad idea.
@@ -1281,8 +1313,8 @@ class Plugin:
 
                 if self.state.failed_phases:
                     self.state.status = "error"
-                    self.state.hint_id = self._hint_for(all_output)
-                    self.state.failed_packages = self._failed_packages(all_output)
+                    self.state.hint_id = self._hint_for(failed_output)
+                    self.state.failed_packages = self._failed_packages(failed_output)
                 else:
                     self.state.status = "done"
             except Exception as exc:
